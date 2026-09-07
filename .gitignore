@@ -10,6 +10,8 @@
 # Lean build artifacts; the generated .lean is tracked under a pinned name
 /verify/lean/.lake/
 /verify/lean/build/
+/verify/lean/lake-manifest.json
+/verify/lean/lake-manifest.json.aeneas-ref
 
 # C build artifacts (Phase 4)
 *.o

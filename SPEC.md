@@ -78,6 +78,7 @@ against the write path rather than invented.
 | `WF-NOSENT-IV` | `∀ e ∈ m. ⊥ ∉ U(e) ∧ ⊥ ∉ L(e)` | **corollary** of `WF-NOWRAP-U/L`, not a separate check |
 | `WF-DISJ-UPPER` | `∀ i ≠ j. U(mᵢ) ∩ U(mⱼ) = ∅` | `mappings_overlap` 771–774, called at 1038 |
 | `WF-DISJ-LOWER` | `∀ i ≠ j. L(mᵢ) ∩ L(mⱼ) = ∅` | `mappings_overlap` 776–779 at 1038 — **but see §1.5: only for pre-remapping values** |
+| `WF-REVERSE-LIVE` | `|m| > 5 -> the reverse array is populated` | `sort_idmaps` 866; install at 1098–1099 happens only after 1089 succeeds. **Added in Phase 3 — see §9.** |
 
 ### 1.2.1 The no-wrap check is one bit stronger than it looks, and that settles the sentinel
 
@@ -709,3 +710,62 @@ within a single function that the Lean proof will have to discharge anyway — i
 they are wrong, the proof fails, which is the check. The marked items are the
 ones where a wrong reading would be silently absorbed into an assumption
 instead.
+
+---
+
+## 9. Changes forced by Phase 3
+
+Called out rather than silently edited, per the Phase 3 brief. Three so far,
+all from writing the model and extracting it; none from a proof yet, because no
+proof has been attempted.
+
+### 9.1 `WF-REVERSE-LIVE` added to `WellFormed`
+
+Writing Model T made an entry condition visible that reading had not.
+`map_id_range_up_max` (372) binary-searches `map->reverse`. `insert_extent`
+sets `map->reverse = NULL` when it migrates to the heap arm (807), and only
+`sort_idmaps` (866) populates it. So an *upward* lookup on a map with
+`nr_extents > 5` and `reverse == NULL` dereferences NULL in the C — safe but
+wrong in Model T, which would silently search a zeroed array.
+
+It is unreachable for a published map: `map_write` installs at 1098–1099 only
+after `sort_idmaps` returned success at 1089, and the failure path at 1108–1112
+frees both arrays and resets `nr_extents` to 0. But that is a three-function
+argument about the C's reachable states, so per §8 it carries
+**[NEEDS EMPIRICAL CHECK]** and enters `WellFormed` as a clause rather than
+being assumed. Model T represents it as the `reverse_live` field; proving
+`nr_extents > 5 -> reverse_live` for every map the write path produces is part
+of F5 `PRESERVE`.
+
+Note this is *narrower* than `A-PUB`: `WF-REVERSE-LIVE` is a sequential
+reachability fact about `map_write`'s straight-line order, which the model
+*can* state and F5 *can* prove. `A-PUB` is about what a concurrent reader
+observes, which it cannot.
+
+### 9.2 `cmp_map_id`'s key is passed by value
+
+Blocker **B-1** in `OPEN_CHALLENGES.md`: Aeneas crashes with an internal
+`Unreachable` in `InterpAbs.merge_abs_conts_aux` on the shape "branch on a
+`bool` read through a reference, where the joined value then feeds a later
+condition" — which is exactly `cmp_map_id` 262–271. Worked around by making
+`IdmapKey` `Copy` and passing it by value. Semantics-preserving (the C's key is
+a stack local at both call sites, and `cmp_map_id` only reads it), tagged
+`DEVIATION` at the definition, and recorded with a five-line reproducer.
+
+This does **not** change any property statement; it changes the signature the
+statements are about. `A-BSEARCH` already covered the monomorphization of the
+callback, and this narrows the same seam slightly further.
+
+### 9.3 `A-UNION` provisionally eliminated
+
+Model T translated through Charon and Aeneas without complaint — `UidGidMap`
+carries both arms, and `insert_extent` reproduces the clobber write. So the
+fallback to Model F was not needed and `A-UNION` is replaced by theorem S5
+`NO-STALE-READ`, stated as non-interference: for maps with `nr_extents > 5`
+agreeing on the heap arm and `nr_extents`, perturbing the base arm arbitrarily
+must not change any lookup.
+
+**S5 is not yet proved.** Until it is, §3's `A-UNION` row is downgraded from
+"assumption" to "obligation", which is progress but not a result. The
+non-interference formulation is currently smoke-tested only
+(`rust/tests/sanity.rs::no_stale_read_smoke`).

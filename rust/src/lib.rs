@@ -127,6 +127,17 @@ impl UidGidMap {
 }
 
 /// `struct idmap_key`, kernel/user_namespace.c:240-244
+///
+/// DEVIATION: `Copy`, and passed to `cmp_map_id` **by value** rather than
+/// behind a reference as the C's `const void *k`. Semantics-preserving:
+/// `cmp_map_id` only reads the key and the C's key is a stack local at both
+/// call sites (:286-288, :375-377), so no aliasing or mutation is observable.
+/// This is also a **workaround for an Aeneas blocker** — branching on a
+/// `bool` read through a reference, where the branch's joined value then
+/// feeds a later condition, hits an internal `Unreachable` in
+/// `InterpAbs.merge_abs_conts_aux`. See OPEN_CHALLENGES.md B-1 for the
+/// five-line reproducer.
+#[derive(Clone, Copy)]
 pub struct IdmapKey {
     /// `true` -> id from kid; `false` -> kid from id
     pub map_up: bool,
@@ -144,7 +155,7 @@ pub struct IdmapKey {
 /// `bsearch` callback indirection is monomorphized away (SPEC `A-BSEARCH`,
 /// ROADMAP §5.1). The callback target is statically unique at both call
 /// sites (:292, :381), so specializing it carries no data.
-pub fn cmp_map_id(key: &IdmapKey, el: &UidGidExtent) -> i32 {
+pub fn cmp_map_id(key: IdmapKey, el: &UidGidExtent) -> i32 {
     let first: u32;
     let last: u32;
     let id2: u32;
@@ -194,7 +205,7 @@ pub fn cmp_map_id(key: &IdmapKey, el: &UidGidExtent) -> i32 {
 /// is semantics-preserving; and Aeneas rejects references nested in `Option`
 /// (prior spike barriers 2-3).
 fn bsearch_extent(
-    key: &IdmapKey,
+    key: IdmapKey,
     arr: &[UidGidExtent; UID_GID_MAP_MAX_EXTENTS],
     nmemb: usize,
 ) -> Option<UidGidExtent> {
@@ -234,7 +245,7 @@ fn map_id_range_down_max(
     count: u32,
 ) -> Option<UidGidExtent> {
     let key = IdmapKey { map_up: false, count, id };
-    return bsearch_extent(&key, &map.forward, extents as usize);
+    return bsearch_extent(key, &map.forward, extents as usize);
 }
 
 /// `map_id_range_down_base`, kernel/user_namespace.c:300-316.
@@ -344,7 +355,7 @@ fn map_id_range_up_max(
     count: u32,
 ) -> Option<UidGidExtent> {
     let key = IdmapKey { map_up: true, count, id };
-    return bsearch_extent(&key, &map.reverse, extents as usize);
+    return bsearch_extent(key, &map.reverse, extents as usize);
 }
 
 /// `map_id_range_up`, kernel/user_namespace.c:384-402.
