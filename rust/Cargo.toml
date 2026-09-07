@@ -1,0 +1,22 @@
+[package]
+name = "uidmap"
+version = "0.1.0"
+edition = "2021"
+description = "Faithful Rust reimplementation of the Linux user-namespace ID-mapping algebra (kernel/user_namespace.c), for Charon/Aeneas/Lean verification"
+license = "GPL-2.0"
+
+# Plain rlib. NOT cdylib/staticlib: Charon cannot extract those crate-types
+# (see ~/kernel-c-to-rust-spike/verify/Cargo.toml). The C-ABI shim for the
+# Phase 4 differential harness will live in its own crate that depends on this
+# one, so this crate stays extractable.
+[lib]
+name = "uidmap"
+path = "src/lib.rs"
+
+[profile.release]
+# Arithmetic that must wrap is written `wrapping_*` at the site (SPEC §3,
+# faithfulness rule 3). This is belt-and-braces so that any site we did NOT
+# mark shows up as a panic rather than silently wrapping in release.
+overflow-checks = true
+
+[workspace]

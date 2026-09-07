@@ -1,7 +1,22 @@
-verify/target/
-verify/lake-packages/
-verify/.lake/
-*.llbc
-*.olean
-fuzz/target/
-__pycache__/
+# Rust build artifacts
+/rust/target/
+/verify/target/
+**/*.rs.bk
+
+# Charon output (the pinned .llbc under verify/llbc/ IS tracked)
+/rust/*.llbc
+/verify/*.llbc
+
+# Lean build artifacts; the generated .lean is tracked under a pinned name
+/verify/lean/.lake/
+/verify/lean/build/
+
+# C build artifacts (Phase 4)
+*.o
+*.a
+*.so
+
+# Fuzzing run artifacts (corpus/, dict/, findings/ ARE tracked)
+/fuzz/target/
+/fuzz/crashes/
+/fuzz/*.log
