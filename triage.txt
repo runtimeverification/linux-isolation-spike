@@ -1,0 +1,86 @@
+REVIEW     kernel/cgroup/cgroup.c:4331
+           table says : cgroup_kn_lock_live
+           really in  : cgroup_file_write
+           line       : if ((cgrp->root->flags & CGRP_ROOT_NS_DELEGATE) &&
+
+REVIEW     kernel/cgroup/misc.c:1
+           table says : misc
+           really in  : ?
+           line       : // SPDX-License-Identifier: GPL-2.0
+
+REVIEW     fs/namespace.c:4700
+           table says : can_idmap_mount
+           really in  : path_pivot_root
+           line       : ex_parent = new_mnt->mnt_parent;
+
+REVIEW     fs/namespace.c:4700
+           table says : can_idmap_mount
+           really in  : path_pivot_root
+           line       : ex_parent = new_mnt->mnt_parent;
+
+IN_BODY    security/security.c:747
+           table says : security_vm_enough_memory_mm
+           really in  : security_vm_enough_memory_mm
+           line       : lsm_for_each_hook(scall, vm_enough_memory) {
+
+RANGE_END  kernel/cgroup/cgroup.c:6836
+           table says : cgroup_css_set_fork
+           really in  : cgroup_css_set_fork
+           line       : ret = cgroup_may_write(dst_cgrp, sb);
+
+RANGE_END  kernel/cgroup/cgroup.c:6854
+           table says : cgroup_css_set_fork
+           really in  : cgroup_css_set_fork
+           line       : ret = cgroup_attach_permissions(cset->dfl_cgrp, dst_cgrp, sb,
+
+RANGE_END  fs/namespace.c:2030
+           table says : can_umount
+           really in  : can_umount
+           line       : if (!check_mnt(mnt))
+
+RANGE_END  fs/namespace.c:2032
+           table says : can_umount
+           really in  : can_umount
+           line       : if (mnt->mnt.mnt_flags & MNT_LOCKED) /* Check optimistically */
+
+RANGE_END  fs/mnt_idmapping.c:159
+           table says : from_vfsuid
+           really in  : from_vfsuid
+           line       : uid = map_id_up(&idmap->uid_map, __vfsuid_val(vfsuid));
+
+RANGE_END  fs/mnt_idmapping.c:188
+           table says : from_vfsgid
+           really in  : from_vfsgid
+           line       : gid = map_id_up(&idmap->gid_map, __vfsgid_val(vfsgid));
+
+RANGE_END  fs/mnt_idmapping.c:373
+           table says : statmount_mnt_idmap
+           really in  : statmount_mnt_idmap
+           line       : lower = map_id_range_up(map_up, extent->lower_first, extent->count);
+
+RANGE_END  fs/overlayfs/copy_up.c:156
+           table says : ovl_copy_xattr
+           really in  : ovl_copy_xattr
+           line       : error = ovl_do_setxattr(OVL_FS(sb), new, name, value, size, 0);
+
+RANGE_END  io_uring/sqpoll.c:239
+           table says : credential
+           really in  : __io_sq_thread
+           line       : revert_creds(creds);
+
+RANGE_END  kernel/bpf/syscall.c:3030
+           table says : bpf_token_capable
+           really in  : bpf_prog_load
+           line       : if (sysctl_unprivileged_bpf_disabled && !bpf_cap)
+
+RANGE_END  kernel/bpf/tnum.c:319
+           table says : abstract
+           really in  : -
+           line       : }
+
+RANGE_END  kernel/bpf/cgroup.c:2796
+           table says : attached
+           really in  : -
+           line       : }
+
+{'REVIEW': 4, 'IN_BODY': 1, 'RANGE_END': 12}

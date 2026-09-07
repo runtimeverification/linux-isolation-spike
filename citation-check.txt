@@ -1,0 +1,53 @@
+MISS  kernel/cgroup/cgroup.c:4331
+      expected one of: cgroup_kn_lock_live
+      line reads:      if ((cgrp->root->flags & CGRP_ROOT_NS_DELEGATE) &&
+MISS  kernel/cgroup/cgroup.c:6836
+      expected one of: cgroup_css_set_fork
+      line reads:      ret = cgroup_may_write(dst_cgrp, sb);
+MISS  kernel/cgroup/cgroup.c:6854
+      expected one of: cgroup_css_set_fork
+      line reads:      ret = cgroup_attach_permissions(cset->dfl_cgrp, dst_cgrp, sb,
+MISS  kernel/cgroup/misc.c:1
+      expected one of: misc
+      line reads:      // SPDX-License-Identifier: GPL-2.0
+MISS  security/security.c:747
+      expected one of: security_vm_enough_memory_mm
+      line reads:      lsm_for_each_hook(scall, vm_enough_memory) {
+MISS  fs/namespace.c:2030
+      expected one of: can_umount
+      line reads:      if (!check_mnt(mnt))
+MISS  fs/namespace.c:2032
+      expected one of: can_umount
+      line reads:      if (mnt->mnt.mnt_flags & MNT_LOCKED) /* Check optimistically */
+MISS  fs/namespace.c:4700
+      expected one of: can_idmap_mount
+      line reads:      ex_parent = new_mnt->mnt_parent;
+MISS  fs/mnt_idmapping.c:159
+      expected one of: from_vfsuid
+      line reads:      uid = map_id_up(&idmap->uid_map, __vfsuid_val(vfsuid));
+MISS  fs/mnt_idmapping.c:188
+      expected one of: from_vfsgid
+      line reads:      gid = map_id_up(&idmap->gid_map, __vfsgid_val(vfsgid));
+MISS  fs/mnt_idmapping.c:373
+      expected one of: statmount_mnt_idmap
+      line reads:      lower = map_id_range_up(map_up, extent->lower_first, extent->count);
+MISS  fs/namespace.c:4700
+      expected one of: can_idmap_mount
+      line reads:      ex_parent = new_mnt->mnt_parent;
+MISS  fs/overlayfs/copy_up.c:156
+      expected one of: ovl_copy_xattr
+      line reads:      error = ovl_do_setxattr(OVL_FS(sb), new, name, value, size, 0);
+MISS  io_uring/sqpoll.c:239
+      expected one of: credential, override, SQPOLL, thread
+      line reads:      revert_creds(creds);
+MISS  kernel/bpf/syscall.c:3030
+      expected one of: bpf_token_capable, CAP_BPF
+      line reads:      if (sysctl_unprivileged_bpf_disabled && !bpf_cap)
+MISS  kernel/bpf/tnum.c:319
+      expected one of: abstract, tristate, number, domain
+      line reads:      }
+MISS  kernel/bpf/cgroup.c:2796
+      expected one of: attached, policy, cgroup, socket
+      line reads:      }
+
+checked 314 citations: 297 ok, 17 suspicious

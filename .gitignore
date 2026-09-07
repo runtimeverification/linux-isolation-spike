@@ -1,0 +1,7 @@
+verify/target/
+verify/lake-packages/
+verify/.lake/
+*.llbc
+*.olean
+fuzz/target/
+__pycache__/
