@@ -571,6 +571,32 @@ handle overflow" (Dmitry Antipov, 2026-05-19, `git describe --contains` ->
 `v7.2-rc1~77^2~64`), which introduced the `2^60` guard at `lib/kstrtox.c` 83
 and the saturation at 84–88. 6.8 predates it; the target tree contains it.
 
+**The branch structure, and where the truncation actually happens.** The
+`res & (~0ull << 60)` test at `lib/kstrtox.c` 83 selects between two
+multiply-adds, not between "checked" and "wrapping": below `2^60` it takes the
+cheap unchecked `res = res * base + val` at 90 (which cannot wrap, per the base
+bound above), and at or above `2^60` it takes `check_mul_overflow` /
+`check_add_overflow` at 84–85, which **store the exact result** and fall through
+to `res = ULLONG_MAX` at 86 only on a real `u64` overflow. So the
+exact/saturating boundary is `2^64`, not `2^60`, and there is no regime in which
+a value between `2^60` and `2^64` is rejected or perturbed.
+
+The full chain for the target tree is `simple_strtoul` (`lib/vsprintf.c` 126)
+-> `simple_strntoull` (79) -> `_parse_integer_limit` (`lib/kstrtox.c` 58). The
+`KSTRTOX_OVERFLOW` bit that 87 sets is discarded by the caller at
+`lib/vsprintf.c` 91, `cp += (rv & ~KSTRTOX_OVERFLOW)` — the kernel's own
+`/* FIXME */` sits on line 90 immediately above it — so the saturation is never
+reported as an error, only as a value. The actual truncation site is the
+`u64`-into-`u32` assignment in `map_write` at 1004, 1009 and 1014.
+
+**Target-tree behaviour, stated once.** On
+`v7.2-rc7-687-ge172eee25cfe`, every decimal literal below `2^64` is parsed
+*exactly* and then silently reduced mod `2^32` by the assignment at 1004/1009/
+1014. Only literals at or above `2^64` are rejected, and only **incidentally**:
+they saturate to `ULLONG_MAX`, whose low 32 bits are exactly the `(u32)-1`
+sentinel that the check at 1024 already refuses for unrelated reasons. Nothing
+in the parser detects the overflow.
+
 **Not a vulnerability, on either kernel.** The truncated values (0, 1, 5) are
 legal ids and every downstream check — sentinel, no-wrap, overlap, parent
 mappability, admission — still applies. What it is: a documented-nowhere

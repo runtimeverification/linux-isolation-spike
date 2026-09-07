@@ -276,10 +276,13 @@ mutex-protected publication. Proposal:
     `(2^60 - 1) * 16 + 15 = 2^64 - 1` — exact fit. That is what the comment at
     80–82, "only if we are within range of it in the max base we support (16)",
     is buying.)
-  - `res >= 2^60` — the **checked** branch at **84–88**: on overflow
-    `res = ULLONG_MAX` and `overflow = KSTRTOX_OVERFLOW`. `simple_strntoull`
-    then discards the flag (`cp += (rv & ~KSTRTOX_OVERFLOW)`, line 89, with the
-    kernel's own `/* FIXME */` beside it) but keeps the saturated value.
+  - `res >= 2^60` — the **checked** branch at **84–85**,
+    `check_mul_overflow` / `check_add_overflow`. These **store the exact
+    result**; the fall-through to `res = ULLONG_MAX` at 86 happens only on a
+    real `u64` overflow. So this branch is exact too, up to `2^64`.
+    `simple_strntoull` then discards the `KSTRTOX_OVERFLOW` bit
+    (`cp += (rv & ~KSTRTOX_OVERFLOW)`, `lib/vsprintf.c` 91, with the kernel's
+    own `/* FIXME */` on 90) but keeps the saturated value.
 
   So on **this tree** the parser is exact below `2^64` and saturating at or
   above it, and there is no mod-`2^64` wrapping regime at all. Truncation to
