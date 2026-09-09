@@ -27,3 +27,8 @@ package «uidmap_verif» where
 
 -- Phase 3 step 3: safety theorems S1–S5 against the generated model.
 @[default_target] lean_lib «Safety» where
+
+-- Phase 3 step 4: the abstract map, WellFormed, and F1/F2/F3.
+@[default_target] lean_lib «Spec» where
+@[default_target] lean_lib «Algebra» where
+@[default_target] lean_lib «WritePath» where

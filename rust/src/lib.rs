@@ -457,3 +457,326 @@ pub fn insert_extent(map: &mut UidGidMap, extent: &UidGidExtent) -> i32 {
     map.nr_extents += 1;
     return 0;
 }
+
+// ======================================================================
+// The write path — kernel/user_namespace.c:745-782 (mappings_overlap),
+// 823-876 (sort), 932-1118 (map_write, extent part)
+// ======================================================================
+
+/// `mappings_overlap`, kernel/user_namespace.c:745-782.
+///
+/// Checks the candidate extent against every extent already inserted, in
+/// **both** coordinates: upper at :771-774, lower at :776-779. Note that in
+/// `map_write` this runs at :1038, BEFORE the re-mapping loop at :1063-1083
+/// overwrites `lower_first` — so the lower-range check here constrains the
+/// parent-namespace ids, not the kernel-global ids the map ends up holding
+/// (SPEC §1.5).
+pub fn mappings_overlap(new_map: &UidGidMap, extent: &UidGidExtent) -> bool {
+    let upper_first: u32;
+    let lower_first: u32;
+    let upper_last: u32;
+    let lower_last: u32;
+    let mut idx: u32;
+
+    upper_first = extent.first;
+    lower_first = extent.lower_first;
+    // WRAPPING (:752, :753). `first + count - 1`; SPEC §1.2.1 shows the
+    // caller's no-wrap checks at :1031/:1033 make these exact.
+    upper_last = upper_first.wrapping_add(extent.count).wrapping_sub(1);
+    lower_last = lower_first.wrapping_add(extent.count).wrapping_sub(1);
+
+    idx = 0;
+    while idx < new_map.nr_extents {
+        let prev_upper_first: u32;
+        let prev_lower_first: u32;
+        let prev_upper_last: u32;
+        let prev_lower_last: u32;
+        let prev: UidGidExtent;
+
+        // :761-764 — the third of the four union dispatch sites.
+        if new_map.nr_extents <= UID_GID_MAP_MAX_BASE_EXTENTS as u32 {
+            prev = new_map.extent[idx as usize];
+        } else {
+            prev = new_map.forward[idx as usize];
+        }
+
+        prev_upper_first = prev.first;
+        prev_lower_first = prev.lower_first;
+        // WRAPPING (:768, :769).
+        prev_upper_last = prev_upper_first.wrapping_add(prev.count).wrapping_sub(1);
+        prev_lower_last = prev_lower_first.wrapping_add(prev.count).wrapping_sub(1);
+
+        // Does the upper range intersect a previous extent? — :771-774
+        if prev_upper_first <= upper_last && prev_upper_last >= upper_first {
+            return true;
+        }
+
+        // Does the lower range intersect a previous extent? — :776-779
+        if prev_lower_first <= lower_last && prev_lower_last >= lower_first {
+            return true;
+        }
+        idx += 1;
+    }
+    return false;
+}
+
+/// The sort key selected by `cmp_extents_forward` (:823-836, key `first`) or
+/// `cmp_extents_reverse` (:838-851, key `lower_first`).
+///
+/// DEVIATION: the two C comparison callbacks become one function with a
+/// by-value `bool` selector. (By value, not through a reference: Aeneas
+/// blocker B-1.)
+fn sort_key(e: UidGidExtent, by_lower_first: bool) -> u32 {
+    if by_lower_first {
+        return e.lower_first;
+    } else {
+        return e.first;
+    }
+}
+
+/// Inner step of an insertion sort: sink `arr[i]` leftwards while the element
+/// before it has a strictly greater key.
+///
+/// Split from `sort_extents` so each function holds exactly one loop (Aeneas
+/// computes one loop fixed point per function).
+fn sort_sink(arr: &mut [UidGidExtent; UID_GID_MAP_MAX_EXTENTS], i: u32, by_lower_first: bool) {
+    let mut j: u32 = i;
+    while j > 0 && sort_key(arr[(j - 1) as usize], by_lower_first) > sort_key(arr[j as usize], by_lower_first) {
+        let tmp: UidGidExtent = arr[j as usize];
+        arr[j as usize] = arr[(j - 1) as usize];
+        arr[(j - 1) as usize] = tmp;
+        j -= 1;
+    }
+}
+
+/// `sort(base, num, size, cmp, NULL)` — `lib/sort.c`, called at :870 and :872.
+///
+/// DEVIATION (`A-SORT`, ROADMAP Amendment 1): the kernel's heapsort (357 LOC,
+/// callback comparison, size-dispatched byte swaps) is replaced by an
+/// insertion sort with the same **contract** — the result is a permutation of
+/// the input, sorted by the key. SPEC §1.5 argues the sorted order is unique
+/// when keys are distinct, so any correct sort agrees with the kernel's; the
+/// Phase 4 harness links the real `lib/sort.c` on the C side to test exactly
+/// that. Stable, in place, and deliberately unclever.
+fn sort_extents(arr: &mut [UidGidExtent; UID_GID_MAP_MAX_EXTENTS], n: u32, by_lower_first: bool) {
+    let mut i: u32 = 1;
+    while i < n {
+        sort_sink(arr, i, by_lower_first);
+        i += 1;
+    }
+}
+
+/// `sort_idmaps`, kernel/user_namespace.c:856-876.
+///
+/// Sorts `forward` by `first`, duplicates it into `reverse`
+/// (`kmemdup_array`, :866-869), sorts `reverse` by `lower_first`.
+///
+/// DEVIATION: `-ENOMEM` at :868-869 is unreachable (fixed array). Returns 0
+/// always.
+pub fn sort_idmaps(map: &mut UidGidMap) -> i32 {
+    if map.nr_extents <= UID_GID_MAP_MAX_BASE_EXTENTS as u32 {
+        return 0;
+    }
+
+    let n: u32 = map.nr_extents;
+
+    // Sort forward array. — :862-863
+    sort_extents(&mut map.forward, n, false);
+
+    // Only copy the memory from forward we actually need. — :865-869
+    let mut i: u32 = 0;
+    while i < n {
+        map.reverse[i as usize] = map.forward[i as usize];
+        i += 1;
+    }
+    map.reverse_live = true;
+
+    // Sort reverse array. — :871-873
+    sort_extents(&mut map.reverse, n, true);
+
+    return 0;
+}
+
+/// Linux errno values used by `map_write`. include/uapi/asm-generic/errno-base.h
+pub const EPERM: i32 = 1;
+pub const EINVAL: i32 = 22;
+
+/// The body of `map_write` from the first parsed extent to the install,
+/// kernel/user_namespace.c:975-1102, **on already-parsed extents**.
+///
+/// SCOPE (ROADMAP Amendment 2): the `__user` copy (:947-952), the
+/// line-splitting and `simple_strtoul` parsing (:995-1020) and the mutex are
+/// outside the model. The input `lines` is the sequence of `(first,
+/// lower_first, count)` triples the parser would have produced, one per line,
+/// in order. `next_line != NULL` at :1042 becomes `i + 1 < lines.len()`.
+///
+/// `A-CAPORACLE`: `cap_ok` stands for
+/// `!(cap_valid(cap_setid) && !file_ns_capable(file, map_ns, CAP_SYS_ADMIN))`
+/// at :986, and `permitted` for `new_idmap_permitted(...)` at :1056. Both are
+/// inputs here; step 6 replaces `permitted` with the real function over an
+/// oracle.
+///
+/// Return: `0` on success (DEVIATION: the C returns the byte count written,
+/// which the model does not have), `-EPERM` / `-EINVAL` as the C. The
+/// `goto out` cleanup at :1107-1113 is performed by the caller `map_write`.
+fn map_write_body(
+    map: &mut UidGidMap,
+    parent_map: &UidGidMap,
+    lines: &[UidGidExtent],
+    cap_ok: bool,
+    permitted: bool,
+    new_map: &mut UidGidMap,
+) -> i32 {
+    let mut ret: i32;
+    let mut idx: u32;
+
+    ret = -EPERM;
+    // Only allow one successful write to the map — :980
+    if map.nr_extents != 0 {
+        return ret;
+    }
+
+    // Adjusting namespace settings requires capabilities on the target. — :986
+    if !cap_ok {
+        return ret;
+    }
+
+    // Parse the user data — :990-1049
+    ret = -EINVAL;
+    let mut i: usize = 0;
+    while i < lines.len() {
+        let extent: UidGidExtent = lines[i];
+        let has_next_line: bool = i + 1 < lines.len();
+
+        // Verify we have been given valid starting values — :1024-1026.
+        // SPEC §1.2.1: redundant given :1031/:1033, since first == (u32)-1
+        // with count >= 1 wraps. Kept because the C keeps it.
+        if extent.first == ID_SENTINEL || extent.lower_first == ID_SENTINEL {
+            return ret;
+        }
+
+        // Verify count is not zero and does not cause the extent to wrap —
+        // :1028-1034. WRAPPING: the u32 sum is compared against `first`; SPEC
+        // §1.2.1 shows this accepts exactly count >= 1 && first + count <= 2^32-1.
+        if extent.first.wrapping_add(extent.count) <= extent.first {
+            return ret;
+        }
+        if extent.lower_first.wrapping_add(extent.count) <= extent.lower_first {
+            return ret;
+        }
+
+        // Do the ranges in extent overlap any previous extents? — :1038
+        if mappings_overlap(new_map, &extent) {
+            return ret;
+        }
+
+        // :1041-1043 — the 340 cap. Exactly 340 extents fit; a 341st line fails.
+        if new_map.nr_extents + 1 == UID_GID_MAP_MAX_EXTENTS as u32 && has_next_line {
+            return ret;
+        }
+
+        ret = insert_extent(new_map, &extent);
+        if ret < 0 {
+            return ret;
+        }
+        ret = -EINVAL;
+        i += 1;
+    }
+    // Be very certain the new map actually exists — :1052-1054
+    if new_map.nr_extents == 0 {
+        return ret;
+    }
+
+    ret = -EPERM;
+    // Validate the user is allowed to use user id's mapped to. — :1056
+    if !permitted {
+        return ret;
+    }
+
+    ret = -EPERM;
+    // Map the lower ids from the parent user namespace to the kernel global
+    // id space. — :1063-1083. This is where lower_first is REWRITTEN (SPEC §1.5).
+    idx = 0;
+    while idx < new_map.nr_extents {
+        let e: UidGidExtent;
+        let lower_first: u32;
+
+        // :1067-1070 — the fourth union dispatch site is verify_root_map's;
+        // this one mirrors :761-764.
+        if new_map.nr_extents <= UID_GID_MAP_MAX_BASE_EXTENTS as u32 {
+            e = new_map.extent[idx as usize];
+        } else {
+            e = new_map.forward[idx as usize];
+        }
+
+        lower_first = map_id_range_down(parent_map, e.lower_first, e.count);
+
+        // Fail if we can not map the specified extent to the kernel global
+        // id space. — :1079-1080
+        if lower_first == ID_SENTINEL {
+            return ret;
+        }
+
+        // `e->lower_first = lower_first;` — :1082
+        if new_map.nr_extents <= UID_GID_MAP_MAX_BASE_EXTENTS as u32 {
+            new_map.extent[idx as usize].lower_first = lower_first;
+        } else {
+            new_map.forward[idx as usize].lower_first = lower_first;
+        }
+        idx += 1;
+    }
+
+    // If we want to use binary search for lookup, this clones the extent
+    // array and sorts both copies. — :1089-1091
+    ret = sort_idmaps(new_map);
+    if ret < 0 {
+        return ret;
+    }
+
+    // Install the map — :1094-1102
+    if new_map.nr_extents <= UID_GID_MAP_MAX_BASE_EXTENTS as u32 {
+        // memcpy(map->extent, new_map.extent, nr * sizeof(...)) — :1095-1096
+        let mut k: u32 = 0;
+        while k < new_map.nr_extents {
+            map.extent[k as usize] = new_map.extent[k as usize];
+            k += 1;
+        }
+    } else {
+        // map->forward = new_map.forward; map->reverse = new_map.reverse; — :1098-1099
+        map.forward = new_map.forward;
+        map.reverse = new_map.reverse;
+        map.forward_live = new_map.forward_live;
+        map.reverse_live = new_map.reverse_live;
+    }
+    // MODEL: smp_wmb() (:1101) — the publication barrier. Assumption A-PUB.
+    map.nr_extents = new_map.nr_extents;
+
+    // *ppos = count; ret = count; — :1103-1104. DEVIATION: byte count not modelled.
+    return 0;
+}
+
+/// `map_write`, kernel/user_namespace.c:932-1118, extent part: sets up the
+/// zeroed `new_map` (:975), runs the body, and performs the `out:` cleanup
+/// (:1107-1113) — which resets `map`'s heap arm only when the failed attempt
+/// had migrated to it.
+pub fn map_write(
+    map: &mut UidGidMap,
+    parent_map: &UidGidMap,
+    lines: &[UidGidExtent],
+    cap_ok: bool,
+    permitted: bool,
+) -> i32 {
+    // memset(&new_map, 0, sizeof(struct uid_gid_map)); — :975
+    let mut new_map: UidGidMap = UidGidMap::zeroed();
+
+    let ret: i32 = map_write_body(map, parent_map, lines, cap_ok, permitted, &mut new_map);
+
+    // out: — :1107-1113
+    if ret < 0 && new_map.nr_extents > UID_GID_MAP_MAX_BASE_EXTENTS as u32 {
+        // kfree(new_map.forward); kfree(new_map.reverse); — no-ops in the model
+        map.forward_live = false; // map->forward = NULL;
+        map.reverse_live = false; // map->reverse = NULL;
+        map.nr_extents = 0;
+    }
+    return ret;
+}

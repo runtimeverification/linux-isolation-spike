@@ -553,4 +553,499 @@ def insert_extent
     let i2 ← map.nr_extents + 1#u32
     ok (0#i32, { map with extent := a, forward := a1, nr_extents := i2 })
 
+/-- [uidmap::mappings_overlap]: loop body 0:
+    Source: 'src/lib.rs', lines 1:0-520:16
+    Visibility: public -/
+@[rust_loop_body]
+def mappings_overlap_loop.body
+  (extent : UidGidExtent) (new_map : UidGidMap) (upper_last : Std.U32)
+  (lower_last : Std.U32) (idx : Std.U32) :
+  Result (ControlFlow Std.U32 Bool)
+  := do
+  if idx < new_map.nr_extents
+  then
+    let i ← lift (UScalar.cast .U32 UID_GID_MAP_MAX_BASE_EXTENTS)
+    let prev ←
+      if new_map.nr_extents <= i
+      then
+        do
+        let i1 ← lift (UScalar.cast .Usize idx)
+        Array.index_usize new_map.extent i1
+      else
+        do
+        let i1 ← lift (UScalar.cast .Usize idx)
+        Array.index_usize new_map.forward i1
+    let i1 ← lift (core.num.U32.wrapping_add prev.first prev.count)
+    let prev_upper_last ← lift (core.num.U32.wrapping_sub i1 1#u32)
+    let i2 ← lift (core.num.U32.wrapping_add prev.lower_first prev.count)
+    let prev_lower_last ← lift (core.num.U32.wrapping_sub i2 1#u32)
+    if prev.first <= upper_last
+    then
+      if prev_upper_last >= extent.first
+      then ok (done true)
+      else
+        if prev.lower_first <= lower_last
+        then
+          if prev_lower_last >= extent.lower_first
+          then ok (done true)
+          else let idx1 ← idx + 1#u32
+               ok (cont idx1)
+        else let idx1 ← idx + 1#u32
+             ok (cont idx1)
+    else
+      if prev.lower_first <= lower_last
+      then
+        if prev_lower_last >= extent.lower_first
+        then ok (done true)
+        else let idx1 ← idx + 1#u32
+             ok (cont idx1)
+      else let idx1 ← idx + 1#u32
+           ok (cont idx1)
+  else ok (done false)
+
+/-- [uidmap::mappings_overlap]: loop 0:
+    Source: 'src/lib.rs', lines 1:0-520:16
+    Visibility: public -/
+@[rust_loop]
+def mappings_overlap_loop
+  (extent : UidGidExtent) (new_map : UidGidMap) (upper_last : Std.U32)
+  (lower_last : Std.U32) (idx : Std.U32) :
+  Result Bool
+  := do
+  loop
+    (fun idx1 => mappings_overlap_loop.body extent new_map upper_last
+      lower_last idx1)
+    idx
+
+/-- [uidmap::mappings_overlap]:
+    Source: 'src/lib.rs', lines 474:0-521:1
+    Visibility: public -/
+def mappings_overlap
+  (new_map : UidGidMap) (extent : UidGidExtent) : Result Bool := do
+  let i ← lift (core.num.U32.wrapping_add extent.first extent.count)
+  let upper_last ← lift (core.num.U32.wrapping_sub i 1#u32)
+  let i1 ← lift (core.num.U32.wrapping_add extent.lower_first extent.count)
+  let lower_last ← lift (core.num.U32.wrapping_sub i1 1#u32)
+  mappings_overlap_loop extent new_map upper_last lower_last 0#u32
+
+/-- [uidmap::sort_key]:
+    Source: 'src/lib.rs', lines 529:0-535:1 -/
+def sort_key (e : UidGidExtent) (by_lower_first : Bool) : Result Std.U32 := do
+  if by_lower_first
+  then ok e.lower_first
+  else ok e.first
+
+/-- [uidmap::sort_sink]: loop body 0:
+    Source: 'src/lib.rs', lines 1:0-549:5 -/
+@[rust_loop_body]
+def sort_sink_loop.body
+  (by_lower_first : Bool) (arr : Array UidGidExtent 340#usize) (j : Std.U32) :
+  Result (ControlFlow ((Array UidGidExtent 340#usize) × Std.U32) (Array
+    UidGidExtent 340#usize))
+  := do
+  if j > 0#u32
+  then
+    let i ← j - 1#u32
+    let i1 ← lift (UScalar.cast .Usize i)
+    let uge ← Array.index_usize arr i1
+    let i2 ← sort_key uge by_lower_first
+    let i3 ← lift (UScalar.cast .Usize j)
+    let uge1 ← Array.index_usize arr i3
+    let i4 ← sort_key uge1 by_lower_first
+    if i2 > i4
+    then
+      let i5 ← lift (UScalar.cast .Usize j)
+      let tmp ← Array.index_usize arr i5
+      let i6 ← lift (UScalar.cast .Usize i)
+      let uge2 ← Array.index_usize arr i6
+      let i7 ← lift (UScalar.cast .Usize j)
+      let arr1 ← Array.update arr i7 uge2
+      let i8 ← lift (UScalar.cast .Usize i)
+      let a ← Array.update arr1 i8 tmp
+      ok (cont (a, i))
+    else ok (done arr)
+  else ok (done arr)
+
+/-- [uidmap::sort_sink]: loop 0:
+    Source: 'src/lib.rs', lines 1:0-549:5 -/
+@[rust_loop]
+def sort_sink_loop
+  (arr : Array UidGidExtent 340#usize) (by_lower_first : Bool) (j : Std.U32) :
+  Result (Array UidGidExtent 340#usize)
+  := do
+  loop
+    (fun (arr1, j1) => sort_sink_loop.body by_lower_first arr1 j1)
+    (arr, j)
+
+/-- [uidmap::sort_sink]:
+    Source: 'src/lib.rs', lines 542:0-550:1 -/
+@[reducible]
+def sort_sink
+  (arr : Array UidGidExtent 340#usize) (i : Std.U32) (by_lower_first : Bool) :
+  Result (Array UidGidExtent 340#usize)
+  := do
+  sort_sink_loop arr by_lower_first i
+
+/-- [uidmap::sort_extents]: loop body 0:
+    Source: 'src/lib.rs', lines 563:4-566:5 -/
+@[rust_loop_body]
+def sort_extents_loop.body
+  (n : Std.U32) (by_lower_first : Bool) (arr : Array UidGidExtent 340#usize)
+  (i : Std.U32) :
+  Result (ControlFlow ((Array UidGidExtent 340#usize) × Std.U32) (Array
+    UidGidExtent 340#usize))
+  := do
+  if i < n
+  then
+    let arr1 ← sort_sink arr i by_lower_first
+    let i1 ← i + 1#u32
+    ok (cont (arr1, i1))
+  else ok (done arr)
+
+/-- [uidmap::sort_extents]: loop 0:
+    Source: 'src/lib.rs', lines 563:4-566:5 -/
+@[rust_loop]
+def sort_extents_loop
+  (arr : Array UidGidExtent 340#usize) (n : Std.U32) (by_lower_first : Bool)
+  (i : Std.U32) :
+  Result (Array UidGidExtent 340#usize)
+  := do
+  loop
+    (fun (arr1, i1) => sort_extents_loop.body n by_lower_first arr1 i1)
+    (arr, i)
+
+/-- [uidmap::sort_extents]:
+    Source: 'src/lib.rs', lines 561:0-567:1 -/
+@[reducible]
+def sort_extents
+  (arr : Array UidGidExtent 340#usize) (n : Std.U32) (by_lower_first : Bool) :
+  Result (Array UidGidExtent 340#usize)
+  := do
+  sort_extents_loop arr n by_lower_first 1#u32
+
+/-- [uidmap::sort_idmaps]: loop body 0:
+    Source: 'src/lib.rs', lines 588:4-591:5
+    Visibility: public -/
+@[rust_loop_body]
+def sort_idmaps_loop.body
+  (a : Array UidGidExtent 340#usize) (n : Std.U32)
+  (a1 : Array UidGidExtent 340#usize) (i : Std.U32) :
+  Result (ControlFlow ((Array UidGidExtent 340#usize) × Std.U32) (Array
+    UidGidExtent 340#usize))
+  := do
+  if i < n
+  then
+    let i1 ← lift (UScalar.cast .Usize i)
+    let uge ← Array.index_usize a i1
+    let i2 ← lift (UScalar.cast .Usize i)
+    let a2 ← Array.update a1 i2 uge
+    let i3 ← i + 1#u32
+    ok (cont (a2, i3))
+  else ok (done a1)
+
+/-- [uidmap::sort_idmaps]: loop 0:
+    Source: 'src/lib.rs', lines 588:4-591:5
+    Visibility: public -/
+@[rust_loop]
+def sort_idmaps_loop
+  (a : Array UidGidExtent 340#usize) (a1 : Array UidGidExtent 340#usize)
+  (n : Std.U32) (i : Std.U32) :
+  Result (Array UidGidExtent 340#usize)
+  := do
+  loop
+    (fun (a2, i1) => sort_idmaps_loop.body a n a2 i1)
+    (a1, i)
+
+/-- [uidmap::sort_idmaps]:
+    Source: 'src/lib.rs', lines 576:0-598:1
+    Visibility: public -/
+def sort_idmaps (map : UidGidMap) : Result (Std.I32 × UidGidMap) := do
+  let i ← lift (UScalar.cast .U32 UID_GID_MAP_MAX_BASE_EXTENTS)
+  if map.nr_extents <= i
+  then ok (0#i32, map)
+  else
+    let a ← sort_extents map.forward map.nr_extents false
+    let a1 ← sort_idmaps_loop a map.reverse map.nr_extents 0#u32
+    let a2 ← sort_extents a1 map.nr_extents true
+    ok (0#i32, { map with forward := a, reverse := a2, reverse_live := true })
+
+/-- [uidmap::EPERM]
+    Source: 'src/lib.rs', lines 601:0-601:25
+    Visibility: public -/
+@[global_simps, irreducible] def EPERM : Std.I32 := 1#i32
+
+/-- [uidmap::EINVAL]
+    Source: 'src/lib.rs', lines 602:0-602:27
+    Visibility: public -/
+@[global_simps, irreducible] def EINVAL : Std.I32 := 22#i32
+
+/-- [uidmap::map_write_body]: loop body 2:
+    Source: 'src/lib.rs', lines 740:8-743:9 -/
+@[rust_loop_body]
+def map_write_body_loop0_loop0_loop0.body
+  (a : Array UidGidExtent 5#usize) (i : Std.U32)
+  (a1 : Array UidGidExtent 5#usize) (k : Std.U32) :
+  Result (ControlFlow ((Array UidGidExtent 5#usize) × Std.U32) (Array
+    UidGidExtent 5#usize))
+  := do
+  if k < i
+  then
+    let i1 ← lift (UScalar.cast .Usize k)
+    let uge ← Array.index_usize a i1
+    let i2 ← lift (UScalar.cast .Usize k)
+    let a2 ← Array.update a1 i2 uge
+    let k1 ← k + 1#u32
+    ok (cont (a2, k1))
+  else ok (done a1)
+
+/-- [uidmap::map_write_body]: loop 2:
+    Source: 'src/lib.rs', lines 740:8-743:9 -/
+@[rust_loop]
+def map_write_body_loop0_loop0_loop0
+  (a : Array UidGidExtent 5#usize) (a1 : Array UidGidExtent 5#usize)
+  (i : Std.U32) (k : Std.U32) :
+  Result (Array UidGidExtent 5#usize)
+  := do
+  loop
+    (fun (a2, k1) => map_write_body_loop0_loop0_loop0.body a1 i a2 k1)
+    (a, k)
+
+/-- [uidmap::map_write_body]: loop body 1:
+    Source: 'src/lib.rs', lines 1:0-755:12 -/
+@[rust_loop_body]
+def map_write_body_loop0_loop0.body
+  (a : Array UidGidExtent 5#usize) (a1 : Array UidGidExtent 340#usize)
+  (a2 : Array UidGidExtent 340#usize) (b : Bool) (b1 : Bool) (i : Std.U32)
+  (parent_map : UidGidMap) (a3 : Array UidGidExtent 340#usize) (b2 : Bool)
+  (b3 : Bool) (i1 : Std.U32) (ret : Std.I32) (a4 : Array UidGidExtent 5#usize)
+  (a5 : Array UidGidExtent 340#usize) (idx : Std.U32) :
+  Result (ControlFlow ((Array UidGidExtent 5#usize) × (Array UidGidExtent
+    340#usize) × Std.U32) (Std.I32 × (Array UidGidExtent 5#usize) × (Array
+    UidGidExtent 340#usize) × (Array UidGidExtent 340#usize) × Bool × Bool
+    × Std.U32 × UidGidMap))
+  := do
+  if idx < i1
+  then
+    let i2 ← lift (UScalar.cast .U32 UID_GID_MAP_MAX_BASE_EXTENTS)
+    let e ←
+      if i1 <= i2
+      then do
+           let i3 ← lift (UScalar.cast .Usize idx)
+           Array.index_usize a4 i3
+      else do
+           let i3 ← lift (UScalar.cast .Usize idx)
+           Array.index_usize a5 i3
+    let lower_first ← map_id_range_down parent_map e.lower_first e.count
+    if lower_first = ID_SENTINEL
+    then
+      ok (done (ret, a, a1, a2, b, b1, i,
+        {
+          extent := a4,
+          forward := a5,
+          reverse := a3,
+          forward_live := b2,
+          reverse_live := b3,
+          nr_extents := i1
+        }))
+    else
+      let i3 ← lift (UScalar.cast .U32 UID_GID_MAP_MAX_BASE_EXTENTS)
+      let (a6, a7) ←
+        if i1 <= i3
+        then
+          do
+          let i4 ← lift (UScalar.cast .Usize idx)
+          let (uge, index_mut_back) ← Array.index_mut_usize a4 i4
+          let a8 := index_mut_back { uge with lower_first }
+          ok (a8, a5)
+        else
+          do
+          let i4 ← lift (UScalar.cast .Usize idx)
+          let (uge, index_mut_back) ← Array.index_mut_usize a5 i4
+          let a8 := index_mut_back { uge with lower_first }
+          ok (a4, a8)
+      let idx1 ← idx + 1#u32
+      ok (cont (a6, a7, idx1))
+  else
+    let (ret1, new_map) ←
+      sort_idmaps
+        {
+          extent := a4,
+          forward := a5,
+          reverse := a3,
+          forward_live := b2,
+          reverse_live := b3,
+          nr_extents := i1
+        }
+    if ret1 < 0#i32
+    then ok (done (ret1, a, a1, a2, b, b1, i, new_map))
+    else
+      let i2 ← lift (UScalar.cast .U32 UID_GID_MAP_MAX_BASE_EXTENTS)
+      if new_map.nr_extents <= i2
+      then
+        let a6 ←
+          map_write_body_loop0_loop0_loop0 a new_map.extent new_map.nr_extents
+            0#u32
+        ok (done (0#i32, a6, a1, a2, b, b1, new_map.nr_extents, new_map))
+      else
+        ok (done (0#i32, a, new_map.forward, new_map.reverse,
+          new_map.forward_live, new_map.reverse_live, new_map.nr_extents,
+          new_map))
+
+/-- [uidmap::map_write_body]: loop 1:
+    Source: 'src/lib.rs', lines 1:0-755:12 -/
+@[rust_loop]
+def map_write_body_loop0_loop0
+  (a : Array UidGidExtent 5#usize) (a1 : Array UidGidExtent 340#usize)
+  (a2 : Array UidGidExtent 340#usize) (b : Bool) (b1 : Bool) (i : Std.U32)
+  (parent_map : UidGidMap) (a3 : Array UidGidExtent 5#usize)
+  (a4 : Array UidGidExtent 340#usize) (a5 : Array UidGidExtent 340#usize)
+  (b2 : Bool) (b3 : Bool) (i1 : Std.U32) (ret : Std.I32) (idx : Std.U32) :
+  Result (Std.I32 × (Array UidGidExtent 5#usize) × (Array UidGidExtent
+    340#usize) × (Array UidGidExtent 340#usize) × Bool × Bool × Std.U32 ×
+    UidGidMap)
+  := do
+  loop
+    (fun (a6, a7, idx1) => map_write_body_loop0_loop0.body a a1 a2 b b1 i
+      parent_map a5 b2 b3 i1 ret a6 a7 idx1)
+    (a3, a4, idx)
+
+/-- [uidmap::map_write_body]: loop body 0:
+    Source: 'src/lib.rs', lines 1:0-755:12 -/
+@[rust_loop_body]
+def map_write_body_loop0.body
+  (ret : Std.I32) (ret1 : Std.I32) (a : Array UidGidExtent 5#usize)
+  (a1 : Array UidGidExtent 340#usize) (a2 : Array UidGidExtent 340#usize)
+  (b : Bool) (b1 : Bool) (i : Std.U32) (parent_map : UidGidMap)
+  (lines : Slice UidGidExtent) (permitted : Bool) (new_map : UidGidMap)
+  (ret2 : Std.I32) (i1 : Std.Usize) :
+  Result (ControlFlow (UidGidMap × Std.I32 × Std.Usize) (Std.I32 × (Array
+    UidGidExtent 5#usize) × (Array UidGidExtent 340#usize) × (Array
+    UidGidExtent 340#usize) × Bool × Bool × Std.U32 × UidGidMap))
+  := do
+  let i2 := Slice.len lines
+  if i1 < i2
+  then
+    let extent ← Slice.index_usize lines i1
+    let i3 ← i1 + 1#usize
+    let i4 := Slice.len lines
+    if extent.first = ID_SENTINEL
+    then ok (done (ret2, a, a1, a2, b, b1, i, new_map))
+    else
+      if extent.lower_first = ID_SENTINEL
+      then ok (done (ret2, a, a1, a2, b, b1, i, new_map))
+      else
+        let i5 ← lift (core.num.U32.wrapping_add extent.first extent.count)
+        if i5 <= extent.first
+        then ok (done (ret2, a, a1, a2, b, b1, i, new_map))
+        else
+          let i6 ←
+            lift (core.num.U32.wrapping_add extent.lower_first extent.count)
+          if i6 <= extent.lower_first
+          then ok (done (ret2, a, a1, a2, b, b1, i, new_map))
+          else
+            let b2 ← mappings_overlap new_map extent
+            if b2
+            then ok (done (ret2, a, a1, a2, b, b1, i, new_map))
+            else
+              let i7 ← new_map.nr_extents + 1#u32
+              let i8 ← lift (UScalar.cast .U32 UID_GID_MAP_MAX_EXTENTS)
+              if i7 = i8
+              then
+                if i3 < i4
+                then ok (done (ret2, a, a1, a2, b, b1, i, new_map))
+                else
+                  let (ret3, new_map1) ← insert_extent new_map extent
+                  if ret3 < 0#i32
+                  then ok (done (ret3, a, a1, a2, b, b1, i, new_map1))
+                  else ok (cont (new_map1, ret1, i3))
+              else
+                let (ret3, new_map1) ← insert_extent new_map extent
+                if ret3 < 0#i32
+                then ok (done (ret3, a, a1, a2, b, b1, i, new_map1))
+                else ok (cont (new_map1, ret1, i3))
+  else
+    if new_map.nr_extents = 0#u32
+    then ok (done (ret2, a, a1, a2, b, b1, i, new_map))
+    else
+      if permitted
+      then
+        let (i3, a3, a4, a5, b2, b3, i4, new_map1) ←
+          map_write_body_loop0_loop0 a a1 a2 b b1 i parent_map new_map.extent
+            new_map.forward new_map.reverse new_map.forward_live
+            new_map.reverse_live new_map.nr_extents ret 0#u32
+        ok (done (i3, a3, a4, a5, b2, b3, i4, new_map1))
+      else ok (done (ret, a, a1, a2, b, b1, i, new_map))
+
+/-- [uidmap::map_write_body]: loop 0:
+    Source: 'src/lib.rs', lines 1:0-755:12 -/
+@[rust_loop]
+def map_write_body_loop0
+  (ret : Std.I32) (ret1 : Std.I32) (a : Array UidGidExtent 5#usize)
+  (a1 : Array UidGidExtent 340#usize) (a2 : Array UidGidExtent 340#usize)
+  (b : Bool) (b1 : Bool) (i : Std.U32) (parent_map : UidGidMap)
+  (lines : Slice UidGidExtent) (permitted : Bool) (new_map : UidGidMap)
+  (ret2 : Std.I32) (i1 : Std.Usize) :
+  Result (Std.I32 × (Array UidGidExtent 5#usize) × (Array UidGidExtent
+    340#usize) × (Array UidGidExtent 340#usize) × Bool × Bool × Std.U32 ×
+    UidGidMap)
+  := do
+  loop
+    (fun (new_map1, ret3, i2) => map_write_body_loop0.body ret ret1 a a1 a2 b
+      b1 i parent_map lines permitted new_map1 ret3 i2)
+    (new_map, ret2, i1)
+
+/-- [uidmap::map_write_body]:
+    Source: 'src/lib.rs', lines 622:0-756:1 -/
+def map_write_body
+  (map : UidGidMap) (parent_map : UidGidMap) (lines : Slice UidGidExtent)
+  (cap_ok : Bool) (permitted : Bool) (new_map : UidGidMap) :
+  Result (Std.I32 × UidGidMap × UidGidMap)
+  := do
+  let ret ← -. EPERM
+  if map.nr_extents != 0#u32
+  then ok (ret, map, new_map)
+  else
+    if cap_ok
+    then
+      let ret1 ← -. EINVAL
+      let (i, a, a1, a2, b, b1, i1, new_map1) ←
+        map_write_body_loop0 ret ret1 map.extent map.forward map.reverse
+          map.forward_live map.reverse_live map.nr_extents parent_map lines
+          permitted new_map ret1 0#usize
+      ok (i,
+        {
+          extent := a,
+          forward := a1,
+          reverse := a2,
+          forward_live := b,
+          reverse_live := b1,
+          nr_extents := i1
+        }, new_map1)
+    else ok (ret, map, new_map)
+
+/-- [uidmap::map_write]:
+    Source: 'src/lib.rs', lines 762:0-782:1
+    Visibility: public -/
+def map_write
+  (map : UidGidMap) (parent_map : UidGidMap) (lines : Slice UidGidExtent)
+  (cap_ok : Bool) (permitted : Bool) :
+  Result (Std.I32 × UidGidMap)
+  := do
+  let new_map ← UidGidMap.zeroed
+  let (ret, map1, new_map1) ←
+    map_write_body map parent_map lines cap_ok permitted new_map
+  if ret < 0#i32
+  then
+    let i ← lift (UScalar.cast .U32 UID_GID_MAP_MAX_BASE_EXTENTS)
+    if new_map1.nr_extents > i
+    then
+      ok (ret,
+        {
+          map1
+            with
+            forward_live := false, reverse_live := false, nr_extents := 0#u32
+        })
+    else ok (ret, map1)
+  else ok (ret, map1)
+
 end uidmap
