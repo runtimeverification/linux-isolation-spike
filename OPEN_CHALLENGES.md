@@ -186,12 +186,26 @@ Base case is `init_user_ns`'s map, read off the initializer
 `nr_extents=1`. Discharged for the base case; the inductive step is
 `PRESERVE-LOWER` (step 4).
 
-### A-UNION — **eliminated, pending step 3.**
+### A-UNION — **reduced by S5, not eliminated.**
 
-Under Model T this is theorem S5 `NO-STALE-READ` rather than an assumption.
-Model T translated cleanly (`UidGidMap` with both arms plus the clobber write
-in `insert_extent`), so the fallback to Model F was not needed. S5 is not yet
-proved; until it is, this line is a promise, not a result.
+Under Model T the two union arms are separate fields and `insert_extent`
+reproduces the clobber, so "no read observes a clobbered slot" could be
+stated about the model. Step 3 proved it as **S5 `NO-STALE-READ`**
+(`no_stale_read_down`, `no_stale_read_up`, `base_arm_only_down` in
+`verify/lean/Safety.lean`): for `nr_extents > 5` the lookups depend only on the
+heap arm and `nr_extents`; for `nr_extents ≤ 5` only on the base arm.
+
+What that does and does not buy, exactly as `VERIFY-REPORT.md` §1 S5 states
+it: S5 proves the *model's* dispatch never touches the base arm above 5.
+Whether the *C* never reads `extent[]` after migration is still a claim about
+the C. S5 shrinks that claim from a semantic one ("no stale read happens") to a
+**structural-correspondence check**: the model's four `nr_extents ≤ 5` dispatch
+sites must mirror the C's at `kernel/user_namespace.c` 324 (`map_id_range_down`),
+390 (`map_id_range_up`), 761 (`mappings_overlap`) and 899 (`verify_root_map`).
+That check is done by side-by-side reading and is exercised by the Phase 4
+differential harness. It is a real reduction — a four-line syntactic
+correspondence instead of a memory-model argument — but it is a residual
+assumption and the matrix marks it `✔*`.
 
 ---
 
