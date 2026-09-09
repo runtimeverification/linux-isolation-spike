@@ -122,8 +122,13 @@ open UidmapWritePath
 #print axioms mappings_overlap_loop_fun
 #print axioms mappings_overlap_fun
 #print axioms preserve_lower_list
--- named gaps: expect sorryAx on each of these, and nowhere else in this file
+#print axioms cmp_zero_inU_range
 #print axioms down_range_sound
+#print axioms nowrap_check_iff
+#print axioms overlaps_self
+#print axioms preRemap_append
+#print axioms nodup_append_of_disjoint
+-- named gaps: expect sorryAx on these two, and on the three that inherit from them
 #print axioms sort_idmaps_fun
 #print axioms remap_install_fun
 #print axioms lines_loop_fun

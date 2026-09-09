@@ -354,14 +354,66 @@ lower_first, count)`, a *range* lookup. Its soundness is the same argument as
 `down_sound` with `id2 = id + count - 1` exact (the check at 1033 gives
 `lower_first + count ≤ W - 1`). -/
 
-/-- **Named gap.** Range soundness of the downward lookup. Provable from
-`base_loop_down_fun` (already general in `id2`), `bsearch_loop_sound` and
-`cmp_map_id_zero_down`; the only new work is the `id2` arithmetic. -/
+/-- Range containment from `cmp_map_id = 0` in the downward polarity: both the
+key's first id and its last id lie in the extent. -/
+theorem cmp_zero_inU_range {key : IdmapKey} {e : UidGidExtent}
+    (hup : key.map_up = false) (hc : 1 ≤ key.count.val) (hnw : key.id.val + key.count.val ≤ 2^32 - 1)
+    (hecnt : 1 ≤ e.count.val) (henw : e.first.val + e.count.val ≤ 2^32 - 1)
+    (h : cmp_map_id key e = ok 0#i32) :
+    inU e key.id.val ∧ inU e (key.id.val + key.count.val - 1) := by
+  have hz := cmp_map_id_zero_down key e hup h
+  have hlast := last_val e.first e.count hecnt (by simp [U32.max_eq]; omega)
+  have hid2 := id2_val key.id key.count hc (by simp [U32.max_eq]; omega)
+  unfold inU; constructor <;> scalar_tac
+
+/-- Range soundness of the downward lookup, both paths: the same argument as
+`down_sound` with `id2 = id + count - 1` exact. Whatever the re-map at 1072
+gets back, if it is not the sentinel, it is the image of `lower_first` under a
+parent extent that contains the *whole* lower range. -/
 theorem down_range_sound (parent : UidGidMap) (hwf : WellFormed parent) (id count : U32)
     (hc : 1 ≤ count.val) (hnw : id.val + count.val ≤ 2^32 - 1) :
     map_id_range_down parent id count ⦃ v => v = ID_SENTINEL ∨
       ∃ p ∈ absFwd parent, inU p id.val ∧ inU p (id.val + count.val - 1) ∧ v.val = apDown p id.val ⦄ := by
-  sorry
+  unfold map_id_range_down
+  have h5 : (UScalar.cast .U32 UID_GID_MAP_MAX_BASE_EXTENTS).val = 5 := by
+    simp [UID_GID_MAP_MAX_BASE_EXTENTS, UScalar.cast_val_eq]
+  have hid2 := id2_val id count hc (by simp [U32.max_eq]; omega)
+  simp only [lift, bind_tc_ok]
+  split
+  · rename_i hle
+    have hle' : parent.nr_extents.val ≤ 5 := by scalar_tac
+    have habs := absFwd_le5 hle'
+    unfold map_id_range_down_base
+    simp only [lift, bind_tc_ok]
+    have hwf' : ∀ e ∈ parent.extent.val.take parent.nr_extents.val,
+        1 ≤ e.count.val ∧ e.first.val + e.count.val ≤ 2^32 - 1 := by
+      intro e he; rw [← habs] at he; exact ⟨hwf.count_pos e he, hwf.nowrap_u e he⟩
+    step with base_loop_down_fun parent.nr_extents parent id _ 0#u32 hle' (by simp) hwf' (by simp) as ⟨ ext, hext ⟩
+    rcases ext with _ | e
+    · simp [spec_ok]
+    · simp only [spec_ok]
+      right
+      obtain ⟨hmem, hin, hin2⟩ := hext
+      rw [← habs] at hmem
+      rw [hid2] at hin2
+      exact ⟨e, hmem, hin, hin2, down_result_val e id hin (hwf.nowrap_l e hmem)⟩
+  · rename_i hgt
+    have hgt' : 5 < parent.nr_extents.val := by scalar_tac
+    have habs := absFwd_gt5 hgt'
+    unfold map_id_range_down_max
+    have hcst : parent.nr_extents.val ≤ UScalar.max .Usize := by scalar_tac
+    step with UScalar.cast_inBounds_spec .Usize parent.nr_extents hcst as ⟨ n, hn ⟩
+    unfold bsearch_extent
+    step with bsearch_loop_sound { map_up := false, id := id, count := count } parent.forward 0#usize n
+      parent.nr_extents.val hwf.len_le (by simp; omega) as ⟨ ext, hext ⟩
+    rcases ext with _ | e
+    · simp [spec_ok]
+    · simp only [spec_ok]
+      right
+      obtain ⟨hmem, hzero⟩ := hext e rfl
+      rw [← habs] at hmem
+      obtain ⟨hin, hin2⟩ := cmp_zero_inU_range rfl hc hnw (hwf.count_pos e hmem) (hwf.nowrap_u e hmem) hzero
+      exact ⟨e, hmem, hin, hin2, down_result_val e id hin (hwf.nowrap_l e hmem)⟩
 
 /-! ## 6. PRESERVE-LOWER on lists: the induction step, assembled -/
 
@@ -414,6 +466,59 @@ theorem preserve_lower_list (parent : UidGidMap) (hwf : WellFormed parent)
       hplo hphi hplo' hphi' (hL.count_pos _ (List.getElem_mem _)) (hL.count_pos _ (List.getElem_mem _))
       hlf hlf' hpre y hy hy'
 
+/-! ## 6b. The checks of the line loop, as list and scalar lemmas -/
+
+/-- The C's no-wrap test at 1031/1033 (`(first + count) <= first` in `u32`),
+read exactly: it accepts `count ≥ 1 ∧ first + count ≤ W - 1` and nothing else
+(SPEC §1.2.1). -/
+theorem nowrap_check_iff (first count : U32) :
+    ¬ (core.num.U32.wrapping_add first count ≤ first) ↔
+      (1 ≤ count.val ∧ first.val + count.val ≤ 2^32 - 1) := by
+  have hv : (core.num.U32.wrapping_add first count).val = (first.val + count.val) % 4294967296 := by
+    simp only [core.num.U32.wrapping_add, UScalar.wrapping_add_val_eq, UScalar.size,
+      UScalarTy.U32_numBits_eq, Nat.reducePow]
+  constructor
+  · intro h; constructor <;> scalar_tac
+  · rintro ⟨hc, hnw⟩ hle; scalar_tac
+
+/-- an extent always overlaps itself (count ≥ 1) -/
+theorem overlaps_self (e : UidGidExtent) (hc : 1 ≤ e.count.val) : overlaps e e :=
+  Or.inl ⟨e.first.val, by unfold inU; omega, by unfold inU; omega⟩
+
+/-- `PreRemap` extends by an extent that passed the checks and is disjoint from all. -/
+theorem preRemap_append (L : List UidGidExtent) (e : UidGidExtent) (hL : PreRemap L)
+    (hc : 1 ≤ e.count.val) (hnwu : e.first.val + e.count.val ≤ 2^32 - 1)
+    (hnwl : e.lower_first.val + e.count.val ≤ 2^32 - 1)
+    (hdisj : ∀ p ∈ L, ¬ overlaps p e) (hlen : L.length + 1 ≤ 340) : PreRemap (L ++ [e]) := by
+  refine ⟨?_, ?_, ?_, ?_, ?_, by simp; omega⟩
+  · intro x hx; simp at hx; rcases hx with hx | rfl; exact hL.count_pos x hx; exact hc
+  · intro x hx; simp at hx; rcases hx with hx | rfl; exact hL.nowrap_u x hx; exact hnwu
+  · intro x hx; simp at hx; rcases hx with hx | rfl; exact hL.nowrap_l x hx; exact hnwl
+  · intro x hx x' hx' y hy hy'
+    simp at hx hx'
+    rcases hx with hx | rfl <;> rcases hx' with hx' | rfl
+    · exact hL.disj_u x hx x' hx' y hy hy'
+    · exact absurd (Or.inl ⟨y, hy, hy'⟩) (hdisj x hx)
+    · exact absurd (Or.inl ⟨y, hy', hy⟩) (hdisj x' hx')
+    · rfl
+  · intro x hx x' hx' y hy hy'
+    simp at hx hx'
+    rcases hx with hx | rfl <;> rcases hx' with hx' | rfl
+    · exact hL.disj_l x hx x' hx' y hy hy'
+    · exact absurd (Or.inr ⟨y, hy, hy'⟩) (hdisj x hx)
+    · exact absurd (Or.inr ⟨y, hy', hy⟩) (hdisj x' hx')
+    · rfl
+
+theorem nodup_append_of_disjoint (L : List UidGidExtent) (e : UidGidExtent) (hnd : L.Nodup)
+    (hc : 1 ≤ e.count.val) (hdisj : ∀ p ∈ L, ¬ overlaps p e) : (L ++ [e]).Nodup := by
+  rw [List.nodup_append]
+  refine ⟨hnd, List.nodup_singleton e, ?_⟩
+  intro a ha b hb hab
+  have hb' : b = e := List.mem_singleton.1 hb
+  subst hb'; subst hab
+  exact hdisj a ha (overlaps_self a hc)
+
+
 /-! ## 7. The remaining loop-level pieces, named -/
 
 /-- Rebuild a `UidGidMap` from the field tuple the folded `map_write_body`
@@ -448,31 +553,188 @@ theorem remap_install_fun (parent : UidGidMap) (hpwf : WellFormed parent)
       r.1 < 0#i32 ∨ (r.1 = 0#i32 ∧ WellFormed (resMap r)) ⦄ := by
   sorry
 
-/-- **Named gap.** The line loop of `map_write_body` (992–1049,
-`map_write_body_loop0`): after `k` accepted lines the abstract map of `new_map`
-is exactly those lines and is `PreRemap`. On exhaustion it hands off to
-`remap_install_fun`; on any failed check it returns `-EINVAL`. -/
+set_option maxHeartbeats 2000000 in
+/-- **The line loop of `map_write_body`** (992–1049, `map_write_body_loop0`):
+after `k` accepted lines the abstract map of `new_map` is exactly those lines,
+is `PreRemap` and duplicate-free, and the exact 340 boundary of 1041 is
+carried as `i1 < 340 ∨ i1 = len`. On exhaustion it hands off to
+`remap_install_fun`; on any failed check it returns the negative code it was
+given. Proved; inherits the `sorry` of `remap_install_fun` only. -/
 theorem lines_loop_fun (parent : UidGidMap) (hpwf : WellFormed parent)
     (map : UidGidMap) (lines : Slice UidGidExtent) (permitted : Bool)
     (new_map : UidGidMap) (i1 : Usize) (ret ret1 ret2 : I32)
+    (hret : ret < 0#i32) (hret1 : ret1 < 0#i32) (hret2 : ret2 < 0#i32)
     (hinv : absFwd new_map = lines.val.take i1.val ∧ PreRemap (absFwd new_map) ∧
-      (absFwd new_map).Nodup ∧ new_map.nr_extents.val = i1.val) :
+      (absFwd new_map).Nodup ∧ new_map.nr_extents.val = i1.val ∧
+      (i1.val < 340 ∨ i1.val = lines.val.length) ∧ i1.val ≤ lines.val.length) :
     map_write_body_loop0 ret ret1 map.extent map.forward map.reverse map.forward_live
       map.reverse_live map.nr_extents parent lines permitted new_map ret2 i1 ⦃ r =>
       r.1 < 0#i32 ∨ (r.1 = 0#i32 ∧ WellFormed (resMap r)) ⦄ := by
-  sorry
+  unfold map_write_body_loop0
+  apply loop.spec_decr_nat (fun p : UidGidMap × I32 × Usize => lines.val.length - p.2.2.val)
+    (fun p : UidGidMap × I32 × Usize => p.2.1 < 0#i32 ∧ absFwd p.1 = lines.val.take p.2.2.val ∧
+      PreRemap (absFwd p.1) ∧ (absFwd p.1).Nodup ∧ p.1.nr_extents.val = p.2.2.val ∧
+      (p.2.2.val < 340 ∨ p.2.2.val = lines.val.length) ∧ p.2.2.val ≤ lines.val.length)
+    _ _ _ _ (And.intro hret2 hinv)
+  intro p hinv
+  obtain ⟨nm, ret3, i2⟩ := p
+  obtain ⟨hr3, habs, hpre, hnd, hnr, hbound, hle⟩ := hinv
+  dsimp only at hr3 habs hpre hnd hnr hbound hle ⊢
+  unfold map_write_body_loop0.body
+  have hlenL : (absFwd nm).length = i2.val := by
+    rw [habs, List.length_take]; omega
+  by_cases hlt : i2 < Slice.len lines
+  · rw [if_pos hlt]
+    have hlt' : i2.val < lines.val.length := by simp [Slice.len] at hlt; scalar_tac
+    have hb : i2.val < lines.length := by simp [Slice.length]; exact hlt'
+    step with Slice.index_usize_spec lines i2 hb as ⟨ extent, hext ⟩
+    step with @UScalar.add_spec .Usize i2 1#usize (by scalar_tac) as ⟨ i3, hi3 ⟩
+    simp only [lift, bind_tc_ok]
+    split
+    · exact (spec_ok _).mpr (Or.inl hr3)
+    split
+    · exact (spec_ok _).mpr (Or.inl hr3)
+    split
+    · exact (spec_ok _).mpr (Or.inl hr3)
+    rename_i hwu
+    split
+    · exact (spec_ok _).mpr (Or.inl hr3)
+    rename_i hwl
+    obtain ⟨hc, hnwu⟩ := (nowrap_check_iff extent.first extent.count).1 hwu
+    obtain ⟨_, hnwl⟩ := (nowrap_check_iff extent.lower_first extent.count).1 hwl
+    have hpwf' : ∀ p ∈ absFwd nm, 1 ≤ p.count.val ∧ p.first.val + p.count.val ≤ 2^32 - 1 ∧
+        p.lower_first.val + p.count.val ≤ 2^32 - 1 :=
+      fun p hp => ⟨hpre.count_pos p hp, hpre.nowrap_u p hp, hpre.nowrap_l p hp⟩
+    have hnr340 : nm.nr_extents.val ≤ 340 := by omega
+    step with mappings_overlap_fun nm extent hnr340 ⟨hc, hnwu, hnwl⟩ hpwf' as ⟨ b2, hb2 ⟩
+    split
+    · exact (spec_ok _).mpr (Or.inl hr3)
+    rename_i hb2f
+    have hdisj : ∀ p ∈ absFwd nm, ¬ overlaps p extent := hb2 (by simpa using hb2f)
+    step with @UScalar.add_spec .U32 nm.nr_extents 1#u32 (by scalar_tac) as ⟨ i7, hi7 ⟩
+    have h340 : (UScalar.cast .U32 UID_GID_MAP_MAX_EXTENTS).val = 340 := by
+      simp [UID_GID_MAP_MAX_EXTENTS, UScalar.cast_val_eq]
+    -- the invariant after a successful insert, shared by both insert branches
+    have hstep : ∀ (nm' : UidGidMap), nm'.nr_extents.val = nm.nr_extents.val + 1 →
+        absFwd nm' = absFwd nm ++ [extent] →
+        (absFwd nm' = lines.val.take i3.val ∧ PreRemap (absFwd nm') ∧ (absFwd nm').Nodup ∧
+          nm'.nr_extents.val = i3.val) := by
+      intro nm' hn' habs'
+      refine ⟨?_, ?_, ?_, by omega⟩
+      · rw [habs', habs, hi3, hext, ← take_add_one_of_getElem lines.val i2.val hlt']
+      · rw [habs']; exact preRemap_append _ _ hpre hc hnwu hnwl hdisj (by omega)
+      · rw [habs']; exact nodup_append_of_disjoint _ _ hnd hc hdisj
+    split
+    · rename_i h339
+      have h339' : nm.nr_extents.val = 339 := by scalar_tac
+      split
+      · exact (spec_ok _).mpr (Or.inl hr3)
+      · rename_i hnonext
+        step with insert_extent_fun nm extent (by omega) as ⟨ ie1, nm', hie1, hn', habs', hrev ⟩
+        split
+        · exfalso; rename_i hneg; scalar_tac
+        · obtain ⟨h1, h2, h3, h4⟩ := hstep nm' hn' habs'
+          apply (spec_ok _).mpr
+          refine ⟨hret1, h1, h2, h3, h4, ?_, by scalar_tac, by scalar_tac⟩
+          show i3.val < 340 ∨ i3.val = lines.val.length
+          right; simp [Slice.len] at hnonext; scalar_tac
+    · rename_i hne339
+      have hlt340 : nm.nr_extents.val < 339 := by
+        rcases hbound with hb | hb
+        · have : nm.nr_extents.val ≠ 339 := by intro h; apply hne339; apply UScalar.eq_of_val_eq; scalar_tac
+          omega
+        · omega
+      step with insert_extent_fun nm extent (by omega) as ⟨ ie1, nm', hie1, hn', habs', hrev ⟩
+      split
+      · exfalso; rename_i hneg; scalar_tac
+      · obtain ⟨h1, h2, h3, h4⟩ := hstep nm' hn' habs'
+        apply (spec_ok _).mpr
+        refine ⟨hret1, h1, h2, h3, h4, ?_, by scalar_tac, by scalar_tac⟩
+        show i3.val < 340 ∨ i3.val = lines.val.length
+        left; scalar_tac
+  · -- lines exhausted
+    rw [if_neg hlt]
+    split
+    · exact (spec_ok _).mpr (Or.inl hr3)
+    · rename_i hnz
+      split
+      · have hpos : 1 ≤ nm.nr_extents.val := by scalar_tac
+        step with remap_install_fun parent hpwf map.extent map.forward map.reverse map.forward_live
+          map.reverse_live map.nr_extents nm hpre hnd hpos ret as ⟨ q1, q2, q3, q4, q5, q6, q7, q8, hres ⟩
+        apply (spec_ok _).mpr
+        exact hres
+      · exact (spec_ok _).mpr (Or.inl hret)
 
 /-! ## 8. F5 — PRESERVE, assembled -/
 
-/-- **F5.** A successful `map_write` into an empty map installs a `WellFormed`
-map, given a `WellFormed` parent (`A-PARENT-WF`). Assembled from the named
-pieces above; `sorry`-free itself, but inherits their `sorry` until they are
-closed. -/
+set_option maxHeartbeats 2000000 in
+/-- **F5.** A successful `map_write` installs a `WellFormed` map, given a
+`WellFormed` parent (`A-PARENT-WF`). No hypothesis on `map` is needed: success
+itself forces the write-once check (980) and the capability check (986) to
+have passed. Proved from `lines_loop_fun`; inherits its `sorry`. -/
 theorem write_preserves_wf (parent : UidGidMap) (hpwf : WellFormed parent)
     (map : UidGidMap) (lines : Slice UidGidExtent) (cap_ok permitted : Bool)
     (r : I32 × UidGidMap) (h : map_write map parent lines cap_ok permitted = ok r)
     (hok : r.1 = 0#i32) : WellFormed r.2 := by
-  sorry
+  unfold map_write at h
+  simp only [UidGidMap.zeroed, bind_tc_ok] at h
+  unfold map_write_body at h
+  simp only [EPERM, EINVAL] at h
+  have hneg1 : (-. (1#i32)) = ok (-1)#i32 := by rfl
+  have hneg2 : (-. (22#i32)) = ok (-22)#i32 := by rfl
+  have hm1 : ((-1)#i32) < 0#i32 := by scalar_tac
+  set z : UidGidExtent := { first := 0#u32, lower_first := 0#u32, count := 0#u32 } with hz
+  set nm0 : UidGidMap := { extent := Array.repeat 5#usize z, forward := Array.repeat 340#usize z, reverse := Array.repeat 340#usize z, forward_live := false, reverse_live := false, nr_extents := 0#u32 } with hnm0
+  rw [hneg1] at h
+  simp only [bind_tc_ok] at h
+  -- the tail of map_write applied to a concrete (ret, map1, new_map1) triple, spelled out
+  have tail : ∀ (c : I32) (m1 nm1 : UidGidMap), c < 0#i32 →
+      (if c < 0#i32 then (do
+          let i ← lift (UScalar.cast .U32 UID_GID_MAP_MAX_BASE_EXTENTS)
+          if nm1.nr_extents > i then ok (c, { m1 with forward_live := false, reverse_live := false, nr_extents := 0#u32 })
+          else ok (c, m1))
+        else ok (c, m1)) = ok r → r.1 = 0#i32 → False := by
+    intro c m1 nm1 hc h hok
+    rw [if_pos hc] at h
+    simp only [lift, bind_tc_ok] at h
+    split at h <;> simp only [ok.injEq] at h <;> subst h <;> dsimp only at hok <;> scalar_tac
+  split at h
+  · -- map already written: ret = -1
+    simp only [bind_tc_ok] at h
+    exact (tail ((-1)#i32) map nm0 hm1 h hok).elim
+  · split at h
+    · -- cap_ok: the real path
+      rw [hneg2] at h
+      simp only [bind_tc_ok] at h
+      have habs0 : absFwd nm0 = [] := by simp [absFwd, hnm0]
+      have hinv : absFwd nm0 = lines.val.take (0#usize).val ∧ PreRemap (absFwd nm0) ∧
+          (absFwd nm0).Nodup ∧ nm0.nr_extents.val = (0#usize).val ∧
+          ((0#usize).val < 340 ∨ (0#usize).val = lines.val.length) ∧ (0#usize).val ≤ lines.val.length := by
+        refine ⟨by simp [habs0], ?_, by simp [habs0], by simp [hnm0], by simp, by simp⟩
+        rw [habs0]; exact ⟨by simp, by simp, by simp, by simp, by simp, by simp⟩
+      have HL := lines_loop_fun parent hpwf map lines permitted nm0 (0#usize) ((-1)#i32) ((-22)#i32) ((-22)#i32)
+        (hret := by scalar_tac) (hret1 := by scalar_tac) (hret2 := by scalar_tac) (hinv := hinv)
+      obtain ⟨v, hv, hpost⟩ := spec_imp_exists HL
+      obtain ⟨i, a, a1, a2, b, b1, i1, nm⟩ := v
+      simp only [resMap, mkMap] at hpost
+      rw [hv] at h
+      simp only [bind_tc_ok] at h
+      rcases hpost with hneg | ⟨hzero, hwf⟩
+      · exact (tail i (mkMap a a1 a2 b b1 i1) nm hneg h hok).elim
+      · subst hzero
+        have h' : (if (0#i32) < 0#i32 then (do
+            let j ← lift (UScalar.cast .U32 UID_GID_MAP_MAX_BASE_EXTENTS)
+            if nm.nr_extents > j then ok ((0#i32), { (mkMap a a1 a2 b b1 i1) with forward_live := false, reverse_live := false, nr_extents := 0#u32 })
+            else ok ((0#i32), mkMap a a1 a2 b b1 i1))
+          else ok ((0#i32), mkMap a a1 a2 b b1 i1)) = ok r := h
+        have hnl : ¬ ((0#i32) < (0#i32)) := by scalar_tac
+        rw [if_neg hnl] at h'
+        simp only [ok.injEq] at h'
+        subst h'
+        exact hwf
+    · -- !cap_ok: ret = -1
+      simp only [bind_tc_ok] at h
+      exact (tail ((-1)#i32) map nm0 hm1 h hok).elim
 
 /-- **F5, closed form.** Every map reachable from `init_user_ns` by a chain of
 successful writes, each into a fresh child with the previous map as parent, is
