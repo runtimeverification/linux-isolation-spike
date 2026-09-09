@@ -810,3 +810,57 @@ used to *find* that class of bug — the same asymmetry as the prior spike's
   C *does* crash there and the model *does not* — i.e. to confirm the
   asymmetry rather than assume it. **[NEEDS EMPIRICAL CHECK]**, carried to
   Phase 4.
+
+### 9.5 Changes forced by the step-4 proofs
+
+All statement-level; none weakens a property. Recorded rather than silently
+edited.
+
+1. **F3 is split.** `ROUNDTRIP` as §4.3 wrote it — `k = ⊥ ∨ up k = x` — is
+   proved as two theorems: `roundtrip_sound` (if `up k` returns anything, it is
+   `x` or `⊥`, **never an unrelated id**) for both paths, and
+   `roundtrip_complete` (it is not `⊥`), proved below 6 extents and resting on
+   `bsearch_complete` above. The split is not cosmetic: soundness needs no
+   sortedness at all, completeness is exactly what sortedness buys. The brief's
+   "containment" property is the soundness half and is closed.
+
+2. **The permutation half of `A-SORT` moved into `WellFormed`.** `rev_perm`
+   says: above 5 extents `reverse_live` and `absRev m ~ absFwd m`. §3 had all of
+   `A-SORT` under F4. In fact the *soundness* of `map_id_up` above 5 extents
+   already needs the `reverse` arm to hold the same extents as `forward`
+   (otherwise an element found in `reverse` need not be in the map at all). The
+   sortedness half stays outside `WellFormed` as `SortedArms`, consumed only by
+   F4. §5's matrix is corrected in `VERIFY-REPORT.md` §3b.
+
+3. **F5 is decomposed, and its hypotheses changed.**
+   - `PreRemap L` names what the line loop establishes before the re-map
+     (§1.2's clauses on the pre-remap values plus `len ≤ 340`).
+   - `Remapped parent L L'` names the re-map position by position, with
+     `getElem?` so no dependent bounds appear.
+   - `preserve_lower_list` is `PRESERVE-LOWER` on lists (proved);
+     `remap_install_fun` is the same at the C loop's level (open, L-4).
+   - `lines_loop_fun` carries three hypotheses §4.5 did not mention: the three
+     return-code parameters of the folded loop are negative; the exact 340
+     boundary of 1041 as `i < 340 ∨ i = len`; and `i ≤ len`. All three are
+     invariants of the C loop, not extra assumptions — the first because the
+     codes are `-EPERM`/`-EINVAL` literals, the second because 1041 rejects
+     the 341st line only when a next line exists, the third because the loop
+     steps by one while `i < len`.
+   - `write_preserves_wf` needs **no hypothesis on the target map**: success
+     forces the write-once check (980) and the capability check (986) to have
+     passed. §4.5 had implicitly assumed an empty target; it is not needed.
+   - `Nodup (absFwd m)` is carried through F5. The C never states it; it
+     follows from upper-disjointness and is needed to tell two positions of the
+     re-mapped list apart. A proof artefact, not a kernel invariant.
+
+4. **`down_range_sound` is a separate theorem from `down_sound`.** The re-map
+   at 1072 uses the range form with the caller's `count`; its soundness needs
+   `count ≥ 1 ∧ id + count ≤ W − 1` — which 1033 provides — so that the C's
+   `id + count − 1` is exact. Stated and proved for both paths.
+
+5. **`init_user_ns_map_wf` is a theorem, not an assumption.** §3 listed the
+   base case of `A-PARENT-WF` as discharged "by the initializer"; it is now
+   proved from `UidGidMap.init_user_ns_map`, and the fact that
+   `count = 2^32 − 1` satisfies `nowrap_u` with nothing to spare is where the
+   `≤ W − 1` bound of §1.2.1 is exercised.
+

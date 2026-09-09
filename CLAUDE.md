@@ -123,11 +123,18 @@ status; this is the map from tag to where it lives.
 | S2+S3 | write path: `cast_usize_val`, `insert_extent_loop_spec`, `insert_extent_spec` | `verify/lean/Safety.lean` | **proved**; hypothesis `nr_extents < 340` |
 | S4 | `NO-OVERFLOW` bridge: `last_val`, `id2_val` | `verify/lean/Safety.lean` | **proved**; hyps `WF-COUNT`, `WF-NOWRAP`. SPEC §4.1's literal `no_overflow_upper` lands with `WellFormed` in step 4 |
 | S5 | `NO-STALE-READ` (Model T): `no_stale_read_down`, `no_stale_read_up`, `base_arm_only_down` | `verify/lean/Safety.lean` | **proved**; reduces `A-UNION` to a structural-correspondence check, does not eliminate it |
-| F2 | `INJECTIVITY` | `verify/lean/Algebra.lean` | step 4, not started |
-| F3 | `ROUNDTRIP` | `verify/lean/Algebra.lean` | step 4, not started |
-| F5 | `PRESERVE` / `PRESERVE-LOWER` | `verify/lean/WritePath.lean` | step 4, not started |
-| F4 | `AGREEMENT` | `verify/lean/Agreement.lean` | step 5, not started |
+| — | abstract map `absFwd`/`absRev`, `WellFormed`, `SortedArms`, algebra lemmas, `init_user_ns_map_wf` | `verify/lean/Spec.lean` | **proved** (9 audited) |
+| F1 | `down_sound`, `up_sound` (single id, both paths), `down_range_sound` (range, both paths) | `Algebra.lean`, `WritePath.lean` | **proved** |
+| F2 | `INJECTIVITY` — `down_injective` | `verify/lean/Algebra.lean` | **proved**, both paths, `sorry`-free |
+| F3 | `ROUNDTRIP` — `roundtrip_sound` (never an unrelated id), `roundtrip_complete_le5` | `verify/lean/Algebra.lean` | **proved**; `roundtrip_complete` above 5 rests on L-1 |
+| F5 | `PRESERVE-LOWER` mathematics — `remap_disjoint`, `preserve_lower_list`; `insert_extent_fun`, `mappings_overlap_fun`, `nowrap_check_iff`, `lines_loop_fun`, `write_preserves_wf`, `reachable_wf` | `verify/lean/WritePath.lean` | mathematics **proved**; assembly proved modulo L-3 `sort_idmaps_fun` and L-4 `remap_install_fun` (`OPEN_CHALLENGES.md`) |
+| F4 | `AGREEMENT` — core is L-1 `bsearch_complete` | `verify/lean/Agreement.lean` | step 5, not started |
 | F6 | `ADMISSION` + 3 lemmas | `verify/lean/Admission.lean` | step 6, not started |
+
+Step 4 audit: 93 declarations; `sorryAx` on exactly `bsearch_complete`,
+`roundtrip_complete`, `sort_idmaps_fun`, `remap_install_fun`, and the three
+that inherit (`lines_loop_fun`, `write_preserves_wf`, `reachable_wf`); saved
+in `verify/lean/axioms-step4.txt`.
 
 Step 3 audit: 42 declarations, all `[propext, Classical.choice, Quot.sound]`
 (two on the strict subset `[propext, Quot.sound]`), no `sorryAx`; saved in
@@ -146,6 +153,38 @@ Proof idioms that worked here, for steps 4–6 (all against Aeneas `c2015b86`):
 - Case-split a `match` under `⦃⦄` with `rcases x with _ | e`, not `split`.
 - `UScalar.ShiftRight_IScalar_spec`'s width side condition needs
   `cases System.Platform.numBits_eq <;> simp [*]`.
+- **`step … as ⟨…⟩` binding rule:** ids fill the *value's tuple components*
+  first, then the post's conjuncts one at a time. For a pair result with a
+  four-conjunct post write `as ⟨v1, v2, h1, h2, h3, h4⟩`; `as ⟨v, h⟩` on a pair
+  silently makes `h` the second component. An `obtain` on the wrong thing then
+  fails far away (`subst` "did not find equation", or `rcases` on an `Eq`
+  silently substituting).
+- After `step`, a `cont`/`ok` goal is usually already reduced past `spec_ok`
+  *and* flattened with `and_assoc` — even under the spec predicate. Use a flat
+  `refine ⟨…⟩`, or `apply (spec_ok _).mpr` then flat. `show` normalizes the
+  unreduced tuple projections `(a, b, c).2.1` before `left`/`right`.
+- `dsimp only` on a goal containing scalar literals can leave it "not
+  type-correct under instances transparency" (a `decide` proof gets reduced),
+  after which `simp` refuses to fire. Prefer `(spec_ok _).mpr` / `exact` by
+  definitional unfolding, or `dsimp only at h₁ h₂` on specific hypotheses.
+- `split` on a freshly unfolded folded-loop body (`map_write_body_loop0.body`)
+  exceeds simp's step budget; use `by_cases h : c` + `rw [if_pos h]` /
+  `rw [if_neg h]`. The folded body's `let x := …` is a real `let`; `rw` cannot
+  see through it, so `dsimp only` first *before* unfolding is fine, after is
+  not (see previous point).
+- A `let (a, b, c) := (x, y, z)` produced by `bind_tc_ok` is a `match` that
+  neither `simp only` nor `dsimp only` iota-reduces; restate the reduced form
+  with `have h' : (if … then … else …) = ok r := h` — the `:= h` is checked by
+  definitional unfolding, which does reduce it. `change` with `_` cannot infer
+  `ite`'s `else` argument here.
+- Multi-line record literals are rejected when the continuation line is
+  indented left of the opening `{`; write one-line records, or a one-line
+  `def mkMap …` and use that (`resMap` in WritePath.lean).
+- `List.getElem?` in statements (`Remapped`, `dispatch_read`), not `getElem`:
+  rewriting the list or the index under a dependent bound proof fails with
+  "motive is not type correct".
+- Big folded-loop theorems need `set_option maxHeartbeats 2000000 in` — placed
+  *above* the doc comment, or Lean reports `expected 'lemma'`.
 
 ## Phase 3 model choice
 

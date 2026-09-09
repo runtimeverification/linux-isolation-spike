@@ -286,21 +286,65 @@ step 3 proceeds.**
 
 ## Named lemmas with `sorry`
 
-**Step 3 (safety, `verify/lean/Safety.lean`): none.** Every theorem in the
-file is closed; `grep -c sorry` is 0 and the audit in
-`verify/lean/axioms-step3.txt` shows only `propext`, `Classical.choice`,
-`Quot.sound` (two theorems use the strict subset `propext, Quot.sound`). This
-section is populated from step 4 onward, one row per `sorry`, with what is
-missing and why.
+Authoritative list: the seven declarations `verify/lean/axioms-step4.txt` shows
+with `sorryAx`. Two are step-5 gaps, two are F5 gaps, three inherit. Nothing on
+this list is called proved anywhere in the repository.
 
-Two things step 3 did **not** do, so that "none" is not over-read:
+### L-1 — `bsearch_complete` (Algebra.lean). **Step-5 gap; the core of F4.**
 
-- S4 is present as its *content* — `last_val` / `id2_val`, the bridge from the
-  `u32`-wrapping computation of `first + count - 1` to the mathematical value
-  under `WF-COUNT` and `WF-NOWRAP` — not as SPEC §4.1's `no_overflow_upper`
-  statement, which is a projection of `WellFormed` and lands with the
-  `WellFormed` definition in step 4.
-- `insert_extent_spec` proves no-panic and `nr_extents + 1` under
-  `nr_extents < 340`. It does **not** yet state what the clobber leaves in
-  `extent[0..1]` or that `forward[0..4]` is a copy of the old base arm; those
-  are the write-path facts F5 needs and belong to step 4.
+Statement: for a prefix of the 340-slot array that is sorted by the key
+(`first` downward, `lower_first` upward), pairwise `count ≥ 1 ∧ nowrap`, and
+contains an extent covering the single id, the monomorphized
+`__inline_bsearch` returns `some _`.
+
+Missing: the monotonicity of `cmp_map_id` along a sorted, disjoint array
+(SPEC §4.4 obligation 1) and the search-window invariant "if a hit exists it
+lies in `[lo, lo+num)`", re-established across both branches including the
+`num--; num >>= 1` one (obligation 2). Soundness of the same loop is proved
+(`bsearch_loop_sound`); completeness is exactly what sortedness buys, and it is
+where a real defect would live. It is the first thing step 5 proves.
+
+### L-2 — `roundtrip_complete` (Algebra.lean). **Inherits L-1.**
+
+Only the `> 5` branch is open; below 6 extents it is proved
+(`roundtrip_complete_le5`). It reduces to L-1 on the `reverse` arm.
+
+### L-3 — `sort_idmaps_fun` (WritePath.lean). **F5 gap; no kernel content.**
+
+Statement: `sort_idmaps` returns `0`, leaves `nr_extents` and `extent` alone,
+permutes the heap arm's abstract list in place, and above 5 extents sets
+`reverse_live` and fills `reverse` with a permutation of `forward`.
+
+Missing: a permutation proof for the insertion sort that stands in for
+`lib/sort.c` under `A-SORT`. Two nested Aeneas loops (`sort_sink_loop`,
+`sort_extents_loop`) plus the copy loop. The statement deliberately asks for
+**permutation only**; sortedness (`SortedArms`) is a separate obligation for
+step 5, consumed by L-1.
+
+### L-4 — `remap_install_fun` (WritePath.lean). **F5 gap; the loop-level PRESERVE-LOWER.**
+
+Statement: from an accumulated `new_map` whose abstract list is `PreRemap` and
+duplicate-free, `map_write_body_loop0_loop0` (the re-map loop at 1063–1083
+plus `sort_idmaps` and the install at 1089–1102) either returns a negative code
+or installs a `WellFormed` map.
+
+Missing: the loop invariant over the union-dispatched write-back at 1082 —
+"positions `< idx` carry the re-mapped `lower_first`, positions `≥ idx` the
+original" — expressed through `Remapped`; then, at exhaustion, `disj_l` from
+`preserve_lower_list` + `down_range_sound` (both **proved**), `rev_perm` from
+L-3, `nowrap_l` for the re-mapped values from the parent's `nowrap_l`, and the
+install memcpy loop (`map_write_body_loop0_loop0_loop0`, the same shape as
+`insert_extent_loop_fun`). The mathematics of PRESERVE-LOWER is closed; this is
+plumbing, but it is the plumbing that turns the mathematics into a statement
+about the C's loop.
+
+### Inheriting: `lines_loop_fun`, `write_preserves_wf`, `reachable_wf`
+
+Each has a complete proof of its own and carries `sorryAx` only through L-4
+(and L-3 via L-4). When L-3 and L-4 close, F5 closes with no further work.
+
+### What was closed in step 4 that had been listed
+
+`down_range_sound` (range soundness, both paths) — proved and moved out of this
+list. `insert_extent_fun`, `mappings_overlap_fun`, `preserve_lower_list`,
+`lines_loop_fun`'s own proof — never listed, proved directly.
