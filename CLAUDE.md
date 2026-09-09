@@ -118,16 +118,34 @@ status; this is the map from tag to where it lives.
 | Tag | Property | Lean location | Status |
 |---|---|---|---|
 | — | the extracted model (15 defs) | `verify/lean/Uidmap.lean` | generated, `sorry`-free, axiom-clean |
-| S1 | `TOTAL-SAFETY` | `verify/lean/Safety.lean` | step 3, not started |
-| S2 | `NO-PANIC` | `verify/lean/Safety.lean` | step 3, not started |
-| S3 | `TERMINATION` | `verify/lean/Safety.lean` | step 3, not started |
-| S4 | `NO-OVERFLOW` | `verify/lean/Safety.lean` | step 3, not started |
-| S5 | `NO-STALE-READ` (Model T) | `verify/lean/Safety.lean` | step 3, not started |
+| S1 | `TOTAL-SAFETY` — `total_safety` + 5 entry-point instances | `verify/lean/Safety.lean` | **proved**, unconditional |
+| S2+S3 | lookups: `cmp_map_id_spec`, `*_base_loop_spec`, `*_base_spec`, `bsearch_extent_loop_spec`, `bsearch_extent_spec`, `map_id_range_{down,up}_spec`, `map_id_{down,up}_spec`, `make_kuid_spec`, `from_kuid_spec` | `verify/lean/Safety.lean` | **proved**; hypothesis `nr_extents ≤ 340` only |
+| S2+S3 | write path: `cast_usize_val`, `insert_extent_loop_spec`, `insert_extent_spec` | `verify/lean/Safety.lean` | **proved**; hypothesis `nr_extents < 340` |
+| S4 | `NO-OVERFLOW` bridge: `last_val`, `id2_val` | `verify/lean/Safety.lean` | **proved**; hyps `WF-COUNT`, `WF-NOWRAP`. SPEC §4.1's literal `no_overflow_upper` lands with `WellFormed` in step 4 |
+| S5 | `NO-STALE-READ` (Model T): `no_stale_read_down`, `no_stale_read_up`, `base_arm_only_down` | `verify/lean/Safety.lean` | **proved**; reduces `A-UNION` to a structural-correspondence check, does not eliminate it |
 | F2 | `INJECTIVITY` | `verify/lean/Algebra.lean` | step 4, not started |
 | F3 | `ROUNDTRIP` | `verify/lean/Algebra.lean` | step 4, not started |
 | F5 | `PRESERVE` / `PRESERVE-LOWER` | `verify/lean/WritePath.lean` | step 4, not started |
 | F4 | `AGREEMENT` | `verify/lean/Agreement.lean` | step 5, not started |
 | F6 | `ADMISSION` + 3 lemmas | `verify/lean/Admission.lean` | step 6, not started |
+
+Step 3 audit: 42 declarations, all `[propext, Classical.choice, Quot.sound]`
+(two on the strict subset `[propext, Quot.sound]`), no `sorryAx`; saved in
+`verify/lean/axioms-step3.txt`. `Safety.lean`: 28 theorems, 0 `sorry`.
+
+Proof idioms that worked here, for steps 4–6 (all against Aeneas `c2015b86`):
+- Loops: `loop.spec_decr_nat measure inv post` gives no-panic + termination +
+  postcondition at once; for a pair-state loop, `rintro ⟨a, b⟩ hinv; dsimp only`
+  before `unfold body`, or `split` will hit the pair-match instead of the `if`.
+- `step with <spec> as ⟨ v, h ⟩` — one id for a `True` post; `_`, not `-`, for
+  an unwanted hypothesis. After `step`, `cont` goals are usually already
+  reduced past `spec_ok`: use `all_goals (try constructor); all_goals scalar_tac`.
+- A leading `simp only [lift, bind_tc_ok]` inlines every `lift (cast ..)`, so
+  no later `step with UScalar.cast_inBounds_spec` will find a bind; use the pure
+  `cast_usize_val` for bounds instead.
+- Case-split a `match` under `⦃⦄` with `rcases x with _ | e`, not `split`.
+- `UScalar.ShiftRight_IScalar_spec`'s width side condition needs
+  `cases System.Platform.numBits_eq <;> simp [*]`.
 
 ## Phase 3 model choice
 

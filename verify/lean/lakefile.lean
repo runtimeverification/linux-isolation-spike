@@ -24,3 +24,6 @@ package «uidmap_verif» where
 -- Uidmap-charon-909ff09a-v0.1.220.lean, which is kept under its pinned name as
 -- the provenance record (the hyphens are not a legal Lean module name).
 @[default_target] lean_lib «Uidmap» where
+
+-- Phase 3 step 3: safety theorems S1–S5 against the generated model.
+@[default_target] lean_lib «Safety» where

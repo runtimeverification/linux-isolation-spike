@@ -102,6 +102,24 @@ key is a stack local at both call sites (`map_id_range_down_max` 286–288,
 `map_id_range_up_max` 375–377), so no aliasing or mutation is observable. It is
 tagged `DEVIATION` at the definition in `rust/src/lib.rs`.
 
+### Phase 4 consequence: two assumptions meet at one function
+
+The by-value `IdmapKey` deviation lives in `cmp_map_id`, which is also the
+function `A-BSEARCH` (the monomorphized callback) routes to the differential
+harness. Two argued-not-proved seams now sit in the same 25 lines and in the
+one code path — the `> 5` binary search — that small hand-written container
+configs never exercise. The general fuzzing run will under-sample it: with
+uniformly random maps most inputs stay on the `≤ 5` linear scan.
+
+**Phase 4 must therefore build a dedicated corpus** for `cmp_map_id` and the
+`> 5` lookup path, not rely on the general run: seed maps with 6, 7, 339 and
+340 extents; keys that land exactly on `first`, on `first + count - 1`, one
+past each, and on the `id + count - 1` wrap boundary; `map_up` in both
+polarities; and ranges (`count > 1`) that straddle two adjacent extents. The
+harness should report coverage of `bsearch`'s three branches separately, and
+a divergence there is to be treated as a defect in the *model*, not the C,
+until shown otherwise.
+
 ### What this is *not*
 
 It is **not** the union blocker
@@ -208,24 +226,67 @@ uid path (`cap_setid == CAP_SETUID`) in full;
 (`proc_projid_map_write` 1154, where `cap_valid(cap_setid)` is false and the
 map is admitted unconditionally at 1200) is not covered.
 
-### S-5 — `WF-REVERSE-LIVE`, a clause writing the model surfaced.
+### S-5 — `WF-REVERSE-LIVE`: the `[NEEDS EMPIRICAL CHECK]` is discharged for the sequential claim
 
-`map_id_range_up_max` (372) binary-searches `map->reverse`, which
-`insert_extent` sets to `NULL` at migration (807) and only `sort_idmaps`
-populates (866). So an upward lookup on a map with `nr_extents > 5` and
-`reverse == NULL` would dereference NULL in the C. It is unreachable because
-`map_write` installs at 1098–1099 only after `sort_idmaps` succeeded at 1089,
-and the error path at 1108–1112 resets `nr_extents` to 0 — but that is a
-three-function argument about the C's reachable states, so per the calibration
-rule it is **[NEEDS EMPIRICAL CHECK]** and it is added to `SPEC.md`'s
-`WellFormed` as `WF-REVERSE-LIVE` rather than assumed. Model T represents it as
-the `reverse_live` flag; nothing yet proves the flag is true whenever
-`nr_extents > 5`.
+`map_id_range_up_max` (372) binary-searches `map->reverse`. The clause says: a
+published map with `nr_extents > 5` has `reverse != NULL`. When first written
+this was a three-function reading and carried the mark. It has since been
+checked the mechanical way — by enumerating **every** writer of `->reverse` in
+the tree (`grep` over `kernel/ fs/ include/`, `*.c *.h`), then reading each
+site in isolation:
+
+| Writer | What it does | Publishes a `>5` map with `reverse == NULL`? |
+|---|---|---|
+| `kernel/user_namespace.c` 809, `insert_extent` | `map->reverse = NULL` at migration | **No** — writes the local `new_map`, which `map_write` never publishes before 1089/1098 |
+| `kernel/user_namespace.c` 866, `sort_idmaps` | `map->reverse = kmemdup_array(...)`; `-ENOMEM` at 868–869 if it fails | No — on failure `map_write` goes to `out:` |
+| `kernel/user_namespace.c` 1098–1099, `map_write` install | `map->forward = ..., map->reverse = ...` | **No** — reached only after `sort_idmaps` returned 0 at 1089–1091 |
+| `kernel/user_namespace.c` 1110–1112, `map_write` `out:` | `forward = NULL; reverse = NULL; nr_extents = 0` | No — `nr_extents` is reset to 0 in the same block |
+| `fs/mnt_idmapping.c` 268–270, `copy_mnt_idmap` | see below | **No** |
+
+`copy_mnt_idmap` (219–272) deserves the detail, since it is the second producer
+of `>5` maps (via `alloc_mnt_idmap` 287, at 298–300, for idmapped mounts). For
+`nr_extents > 5` (the `≤ 5` case is a whole-struct copy at 244–247) it
+`kmemdup_array`s **both** arrays — `forward` at 249–251, `reverse` at 255–257
+— fails with `-ENOMEM` if either allocation fails (252–253; 258–261, freeing
+`forward`), and only then stores `forward` (268), `reverse` (269) and
+`nr_extents` (270), in that order. So a copied map with `nr_extents > 5`
+always has `reverse` populated. Two caveats, stated rather than glossed:
+
+- it **preserves** the clause from its source rather than establishing it:
+  `kmemdup_array(map_from->reverse, ...)` at 255 would dereference NULL if the
+  *source* had `reverse == NULL`, so it relies on the source (a published
+  userns map) already satisfying `WF-REVERSE-LIVE`;
+- the ordering at 268–270 is a sequential fact; whether a *concurrent* reader
+  can observe `nr_extents` before `reverse` is `A-PUB` — and the comment at
+  263–267 argues the map is not yet exposed, which is again a claim this model
+  cannot check.
+
+**Disposition.** The sequential claim — no writer publishes a `>5` map with
+`reverse == NULL` — is established by exhaustive enumeration and the mark is
+dropped for it. The concurrent-visibility residue folds into `A-PUB`. Model T
+carries `reverse_live`; F5 `PRESERVE` (step 4) is where `nr_extents > 5 ->
+reverse_live` is proved for `map_write`'s output. **Not a finding candidate;
+step 3 proceeds.**
 
 ---
 
 ## Named lemmas with `sorry`
 
-None yet — step 2 (extraction round trip) is where this phase currently stands
-and no Lean proofs have been attempted. This section is populated from step 3
-onward, one row per `sorry`, with what is missing and why.
+**Step 3 (safety, `verify/lean/Safety.lean`): none.** Every theorem in the
+file is closed; `grep -c sorry` is 0 and the audit in
+`verify/lean/axioms-step3.txt` shows only `propext`, `Classical.choice`,
+`Quot.sound` (two theorems use the strict subset `propext, Quot.sound`). This
+section is populated from step 4 onward, one row per `sorry`, with what is
+missing and why.
+
+Two things step 3 did **not** do, so that "none" is not over-read:
+
+- S4 is present as its *content* — `last_val` / `id2_val`, the bridge from the
+  `u32`-wrapping computation of `first + count - 1` to the mathematical value
+  under `WF-COUNT` and `WF-NOWRAP` — not as SPEC §4.1's `no_overflow_upper`
+  statement, which is a projection of `WellFormed` and lands with the
+  `WellFormed` definition in step 4.
+- `insert_extent_spec` proves no-panic and `nr_extents + 1` under
+  `nr_extents < 340`. It does **not** yet state what the clobber leaves in
+  `extent[0..1]` or that `forward[0..4]` is a copy of the old base arm; those
+  are the write-path facts F5 needs and belong to step 4.

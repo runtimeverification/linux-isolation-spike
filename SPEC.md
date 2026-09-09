@@ -769,3 +769,44 @@ must not change any lookup.
 "assumption" to "obligation", which is progress but not a result. The
 non-interference formulation is currently smoke-tested only
 (`rust/tests/sanity.rs::no_stale_read_smoke`).
+
+### 9.4 What the step-3 proofs sharpened (no statement weakened)
+
+Two of the safety statements came out *stronger* than SPEC §2 predicted, in
+the sense of needing less; both are recorded rather than silently absorbed.
+
+**S2/S3 for every lookup needs only `nr_extents ≤ 340`, not `WellFormed`.**
+`map_id_range_down_spec` / `_up_spec` (and hence `map_id_down`, `map_id_up`,
+`make_kuid`, `from_kuid`) are proved to return `ok` under the single hypothesis
+`m.nr_extents.val ≤ 340` — the upper half of `WF-LEN` — and nothing else. The
+`≤ 5` linear scan needs no hypothesis at all (its indices are bounded by the
+dispatch); the `> 5` binary search needs exactly the array bound, because with
+`nr_extents > 340` `bsearch` would read past the 340-slot heap array — in the
+model, `fail`; in the C, a heap over-read. So the lookup path's *memory safety*
+depends on one clause of `WellFormed`, established by `map_write` 1041, and on
+no arithmetic clause. `WellFormed` is still what the *functional* properties
+need (F1–F5); §5's matrix is updated accordingly in `VERIFY-REPORT.md`.
+
+**Model T cannot express the C's NULL-`reverse` hazard, and that changes what
+`WF-REVERSE-LIVE` is.** `map_id_range_up_spec` was proved without any
+`reverse_live` hypothesis. That is not because the proof found the hazard
+harmless; it is because in Model T the `reverse` array *always exists* (as a
+zeroed 340-slot array), so there is no state in which the C's
+`bsearch(&key, map->reverse, ...)` at 380 dereferences NULL. The model is
+memory-safe where the C is not, by construction, and so the model cannot be
+used to *find* that class of bug — the same asymmetry as the prior spike's
+"Rust panics where the C writes out of bounds". Consequences:
+
+- `WF-REVERSE-LIVE` is a **C-level** clause. Its content is the writer
+  enumeration in `OPEN_CHALLENGES.md` S-5 (every producer of a published
+  `> 5` map stores `reverse` before `nr_extents`); the model trivially
+  satisfies it and F5 will prove `reverse_live` for `map_write`'s output, but
+  that proof is about the flag, not about the C's pointer.
+- The differential harness (Phase 4) is the only place the hazard is
+  observable, and only negatively: a C build under ASan/UBSan would report a
+  NULL dereference if a `> 5` map ever reached `map_id_range_up_max` with
+  `reverse == NULL`. It should be given a corpus entry that constructs a
+  migrated-but-unsorted map directly (bypassing `map_write`) to confirm the
+  C *does* crash there and the model *does not* — i.e. to confirm the
+  asymmetry rather than assume it. **[NEEDS EMPIRICAL CHECK]**, carried to
+  Phase 4.
