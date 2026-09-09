@@ -22,7 +22,7 @@ had no prior formal treatment we could find.
 
 | Phase | Content | State |
 |---|---|---|
-| 0 | inventory of isolation primitives, with verified line references | done — `INVENTORY.md` |
+| 0 | inventory of isolation primitives, with machine-checked line references | done — `INVENTORY.md` |
 | 1 | target scoring and selection | done — `ROADMAP.md` |
 | 2 | specification: data model, `WellFormed`, properties, assumptions | done — `SPEC.md` |
 | 3.1–3.2 | Rust reimplementation, Charon → Aeneas → Lean round trip | done — 15 definitions, no `sorry` in generated code |
